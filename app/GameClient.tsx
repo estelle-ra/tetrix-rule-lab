@@ -13,7 +13,10 @@ import type {
 } from "react";
 import type { DataConnection, Peer as PeerInstance } from "peerjs";
 import type { RealtimeChannel } from "@supabase/supabase-js";
-import AuthGate, { type PlayerIdentity } from "./AuthGate";
+import AuthGate, {
+  type MobileControlLayout,
+  type PlayerIdentity,
+} from "./AuthGate";
 import { supabase } from "./lib/supabase";
 
 type PieceName = "I" | "J" | "L" | "O" | "S" | "T" | "Z";
@@ -23,6 +26,7 @@ type Board = Cell[][];
 type Status = "playing" | "paused" | "won" | "lost";
 type Screen = "home" | "sprint" | "blitz" | "zen" | "versus";
 type GameTheme = "megacity" | "orbit" | "refinery";
+type FinishReason = "topout" | "garbage";
 type GameAction =
   | "left"
   | "right"
@@ -143,7 +147,7 @@ type RoomPacket =
   | { type: "lobby"; players: RoomPlayer[]; rules: Rules }
   | { type: "host-transfer"; hostId: string; players: RoomPlayer[] }
   | { type: "snapshot"; playerId?: string; snapshot: GameSnapshot }
-  | { type: "finish"; status: "lost" }
+  | { type: "finish"; status: "lost"; reason?: FinishReason }
   | {
       type: "end";
       winnerId: string;
@@ -395,8 +399,10 @@ type BoardProps = {
   compact?: boolean;
   garbage?: { id: number; amount: number };
   ink?: { id: number };
+  matchOutcome?: "won" | "lost" | null;
+  mobileControlLayout?: MobileControlLayout;
   onAttack?: (amount: number) => void;
-  onFinish?: (status: "won" | "lost") => void;
+  onFinish?: (status: "won" | "lost", reason?: FinishReason) => void;
   onSnapshot?: (snapshot: GameSnapshot) => void;
   onResult?: (result: GameResult) => void | Promise<void>;
 };
@@ -409,6 +415,8 @@ function GameBoard({
   compact = false,
   garbage,
   ink,
+  matchOutcome = null,
+  mobileControlLayout = "joystick",
   onAttack,
   onFinish,
   onSnapshot,
@@ -454,6 +462,7 @@ function GameBoard({
   const lockResetCount = useRef(0);
   const lastActionWasRotation = useRef(false);
   const lastRotationKickIndex = useRef(-1);
+  const lastGarbageAtRef = useRef(0);
   const joystickPointer = useRef<number | null>(null);
   const joystickDirection = useRef<GameAction | null>(null);
   const joystickOriginRef = useRef({ x: 0, y: 0 });
@@ -461,6 +470,12 @@ function GameBoard({
   useEffect(() => {
     startedAt.current = Date.now();
   }, []);
+
+  useEffect(() => {
+    if (mode !== "versus" || !matchOutcome) return;
+    const frame = window.requestAnimationFrame(() => setStatus(matchOutcome));
+    return () => window.cancelAnimationFrame(frame);
+  }, [matchOutcome, mode]);
 
   useEffect(() => {
     const updateFocus = () =>
@@ -479,11 +494,11 @@ function GameBoard({
   }, []);
 
   const finish = useCallback(
-    (nextStatus: "won" | "lost") => {
+    (nextStatus: "won" | "lost", reason?: FinishReason) => {
       setStatus(nextStatus);
       if (!finishSent.current) {
         finishSent.current = true;
-        onFinish?.(nextStatus);
+        onFinish?.(nextStatus, reason);
       }
     },
     [onFinish],
@@ -509,7 +524,12 @@ function GameBoard({
         else if (y < HEIGHT && x >= 0 && x < WIDTH) merged[y][x] = piece.type;
       });
       if (overflow) {
-        finish("lost");
+        finish(
+          "lost",
+          Date.now() - lastGarbageAtRef.current < 1600
+            ? "garbage"
+            : "topout",
+        );
         return;
       }
 
@@ -599,7 +619,12 @@ function GameBoard({
       if (mode === "sprint" && nextLines >= 40) {
         finish("won");
       } else if (collides(cleaned, nextPiece)) {
-        finish("lost");
+        finish(
+          "lost",
+          Date.now() - lastGarbageAtRef.current < 1600
+            ? "garbage"
+            : "topout",
+        );
       }
     },
     [
@@ -688,6 +713,7 @@ function GameBoard({
 
   useEffect(() => {
     if (!garbage?.amount || status !== "playing") return;
+    lastGarbageAtRef.current = Date.now();
     let clearTimer: number | undefined;
     const applyTimer = window.setTimeout(() => {
       setBoard((current) => {
@@ -974,6 +1000,10 @@ function GameBoard({
     }
   };
 
+  const stopMobilePress = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    stopRepeat(`touch:${event.pointerId}`);
+  };
+
   const updateJoystick = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (joystickPointer.current !== event.pointerId) return;
     event.preventDefault();
@@ -1212,7 +1242,7 @@ function GameBoard({
               <i />
             </div>
           )}
-          {status !== "playing" && (
+          {status !== "playing" && !(mode === "versus" && matchOutcome) && (
             <div className="board-overlay">
               <strong>
                 {status === "paused"
@@ -1252,51 +1282,80 @@ function GameBoard({
         </aside>
       </div>
       <div className="mobile-controls" aria-label="모바일 게임 조작">
-        <div className="touch-movement">
-          <button
-            aria-label="블록 왼쪽으로 한 칸 이동"
-            className="touch-step touch-step-left"
-            onPointerDown={(event) => handleMobilePress(event, "left")}
-          >
-            ←
-          </button>
+        {mobileControlLayout === "buttons" ? (
           <div
-            className={`touch-zone ${joystickActive ? "touch-zone-active" : ""}`}
-            role="group"
-            aria-label="왼손 이동 조이스틱"
-            onPointerDown={startJoystick}
-            onPointerMove={updateJoystick}
-            onPointerUp={stopJoystick}
-            onPointerCancel={stopJoystick}
-            onLostPointerCapture={stopJoystick}
+            className="touch-movement touch-movement-buttons"
+            aria-label="버튼형 이동키"
           >
-            <span className="touch-zone-hint">누른 뒤 끌어서 연속 이동</span>
-            {joystickActive && (
-              <span
-                className="joystick-base"
-                style={{
-                  left: `${joystickOrigin.x}px`,
-                  top: `${joystickOrigin.y}px`,
-                }}
+            {(
+              [
+                ["left", "←", "블록 왼쪽 이동"],
+                ["down", "↓", "블록 아래 이동"],
+                ["right", "→", "블록 오른쪽 이동"],
+              ] as const
+            ).map(([action, label, ariaLabel]) => (
+              <button
+                aria-label={ariaLabel}
+                className={`touch-direction touch-direction-${action}`}
+                key={action}
+                onPointerDown={(event) =>
+                  handleMobilePress(event, action, true)
+                }
+                onPointerUp={stopMobilePress}
+                onPointerCancel={stopMobilePress}
+                onLostPointerCapture={stopMobilePress}
               >
-                <span className="joystick-deadzone" />
-                <span
-                  className="joystick-stick"
-                  style={{
-                    transform: `translate(${joystickVector.x}px, ${joystickVector.y}px)`,
-                  }}
-                />
-              </span>
-            )}
+                {label}
+              </button>
+            ))}
           </div>
-          <button
-            aria-label="블록 오른쪽으로 한 칸 이동"
-            className="touch-step touch-step-right"
-            onPointerDown={(event) => handleMobilePress(event, "right")}
-          >
-            →
-          </button>
-        </div>
+        ) : (
+          <div className="touch-movement">
+            <button
+              aria-label="블록 왼쪽으로 한 칸 이동"
+              className="touch-step touch-step-left"
+              onPointerDown={(event) => handleMobilePress(event, "left")}
+            >
+              ←
+            </button>
+            <div
+              className={`touch-zone ${joystickActive ? "touch-zone-active" : ""}`}
+              role="group"
+              aria-label="왼손 이동 조이스틱"
+              onPointerDown={startJoystick}
+              onPointerMove={updateJoystick}
+              onPointerUp={stopJoystick}
+              onPointerCancel={stopJoystick}
+              onLostPointerCapture={stopJoystick}
+            >
+              <span className="touch-zone-hint">누른 뒤 끌어서 연속 이동</span>
+              {joystickActive && (
+                <span
+                  className="joystick-base"
+                  style={{
+                    left: `${joystickOrigin.x}px`,
+                    top: `${joystickOrigin.y}px`,
+                  }}
+                >
+                  <span className="joystick-deadzone" />
+                  <span
+                    className="joystick-stick"
+                    style={{
+                      transform: `translate(${joystickVector.x}px, ${joystickVector.y}px)`,
+                    }}
+                  />
+                </span>
+              )}
+            </div>
+            <button
+              aria-label="블록 오른쪽으로 한 칸 이동"
+              className="touch-step touch-step-right"
+              onPointerDown={(event) => handleMobilePress(event, "right")}
+            >
+              →
+            </button>
+          </div>
+        )}
         <div className="touch-actions" aria-label="오른손 액션 버튼">
           <button
             className="touch-button touch-rotate"
@@ -1347,6 +1406,10 @@ function roomPeerId(code: string) {
 
 function cleanPlayerName(value: string) {
   return value.trim().replace(/\s+/g, " ").slice(0, 16) || "PLAYER";
+}
+
+function cleanMobileControlLayout(value: unknown): MobileControlLayout {
+  return value === "buttons" ? "buttons" : "joystick";
 }
 
 function cleanChatText(value: string) {
@@ -1570,6 +1633,7 @@ function OnlineParty({
   defaultPlayerName,
   initialRoomCode,
   canAutoJoin,
+  mobileControlLayout,
   onPlayingChange,
   onMatchResult,
 }: {
@@ -1577,6 +1641,7 @@ function OnlineParty({
   defaultPlayerName: string;
   initialRoomCode: string;
   canAutoJoin: boolean;
+  mobileControlLayout: MobileControlLayout;
   onPlayingChange: (playing: boolean) => void;
   onMatchResult: (result: GameResult) => void | Promise<void>;
 }) {
@@ -1591,7 +1656,11 @@ function OnlineParty({
   const [localId, setLocalId] = useState("");
   const [players, setPlayers] = useState<RoomPlayer[]>([]);
   const [roomError, setRoomError] = useState("");
+  const [winnerId, setWinnerId] = useState("");
   const [winnerName, setWinnerName] = useState("");
+  const [showResultCard, setShowResultCard] = useState(false);
+  const [localEndReason, setLocalEndReason] =
+    useState<FinishReason>("topout");
   const [matchId, setMatchId] = useState(0);
   const [matchRules, setMatchRules] = useState(rules);
   const [garbageSignal, setGarbageSignal] = useState({ id: 0, amount: 0 });
@@ -1621,6 +1690,7 @@ function OnlineParty({
   const connectionAttemptRef = useRef(0);
   const connectionTimeoutRef = useRef<number | null>(null);
   const countdownTimerRef = useRef<number | null>(null);
+  const resultRevealTimerRef = useRef<number | null>(null);
   const activeMatchIdRef = useRef(0);
   const resultMatchIdRef = useRef(0);
   const targetCursor = useRef(0);
@@ -1636,7 +1706,9 @@ function OnlineParty({
   }, [defaultPlayerName]);
 
   useEffect(() => {
-    onPlayingChange(phase === "playing" || phase === "countdown");
+    onPlayingChange(
+      phase === "playing" || phase === "countdown" || phase === "ended",
+    );
   }, [onPlayingChange, phase]);
 
   useEffect(() => {
@@ -1661,6 +1733,25 @@ function OnlineParty({
       window.clearInterval(countdownTimerRef.current);
       countdownTimerRef.current = null;
     }
+  };
+
+  const clearResultReveal = () => {
+    if (resultRevealTimerRef.current !== null) {
+      window.clearTimeout(resultRevealTimerRef.current);
+      resultRevealTimerRef.current = null;
+    }
+  };
+
+  const beginMatchEnd = (nextWinnerId: string, nextWinnerName: string) => {
+    clearResultReveal();
+    setWinnerId(nextWinnerId);
+    setWinnerName(nextWinnerName);
+    setShowResultCard(false);
+    setPhase("ended");
+    resultRevealTimerRef.current = window.setTimeout(() => {
+      setShowResultCard(true);
+      resultRevealTimerRef.current = null;
+    }, 2600);
   };
 
   const beginCountdown = (startAt: number) => {
@@ -1809,8 +1900,7 @@ function OnlineParty({
       player.id === winner.id ? { ...player, alive: true } : player,
     );
     replacePlayers(finalPlayers);
-    setWinnerName(winner.name);
-    setPhase("ended");
+    beginMatchEnd(winner.id, winner.name);
     reportLocalMatchResult(finalPlayers, winner.id);
     broadcast({
       type: "end",
@@ -2200,12 +2290,16 @@ function OnlineParty({
       }
     }
     if (packet.type === "start") {
+      clearResultReveal();
       replacePlayers(packet.players);
       rulesRef.current = packet.rules;
       setMatchRules(packet.rules);
       setMatchId(packet.matchId);
       activeMatchIdRef.current = packet.matchId;
+      setWinnerId("");
       setWinnerName("");
+      setShowResultCard(false);
+      setLocalEndReason("topout");
       setGarbageSignal({ id: 0, amount: 0 });
       setInkSignal({ id: 0 });
       setInkedPlayers({});
@@ -2231,10 +2325,13 @@ function OnlineParty({
     }
     if (packet.type === "lobby") {
       clearCountdown();
+      clearResultReveal();
       replacePlayers(packet.players);
       rulesRef.current = packet.rules;
       setMatchRules(packet.rules);
+      setWinnerId("");
       setWinnerName("");
+      setShowResultCard(false);
       setSelectedTargetId("");
       setInkUsed(0);
       setAttackLogs([]);
@@ -2245,8 +2342,7 @@ function OnlineParty({
     if (packet.type === "end") {
       clearCountdown();
       replacePlayers(packet.players);
-      setWinnerName(packet.winnerName);
-      setPhase("ended");
+      beginMatchEnd(packet.winnerId, packet.winnerName);
       reportLocalMatchResult(packet.players, packet.winnerId);
     }
     if (packet.type === "full") {
@@ -2622,6 +2718,7 @@ function OnlineParty({
 
   const returnToLobby = () => {
     clearCountdown();
+    clearResultReveal();
     setInkSignal({ id: 0 });
     setInkedPlayers({});
     if (roleRef.current !== "host") {
@@ -2641,7 +2738,10 @@ function OnlineParty({
     setSelectedTargetId("");
     setInkUsed(0);
     setAttackLogs([]);
+    setWinnerId("");
     setWinnerName("");
+    setShowResultCard(false);
+    setLocalEndReason("topout");
     replacePlayers(next);
     setPhase("lobby");
     broadcast({
@@ -2677,6 +2777,7 @@ function OnlineParty({
     const nextMatchId = Date.now();
     const startAt = Date.now() + 3000;
     targetCursor.current = 0;
+    clearResultReveal();
     manualTargetsRef.current.clear();
     itemUsesRef.current.clear();
     setSelectedTargetId("");
@@ -2686,7 +2787,10 @@ function OnlineParty({
     setInkedPlayers({});
     replacePlayers(next);
     setRoomError("");
+    setWinnerId("");
     setWinnerName("");
+    setShowResultCard(false);
+    setLocalEndReason("topout");
     setMatchId(nextMatchId);
     activeMatchIdRef.current = nextMatchId;
     setMatchRules(rulesRef.current);
@@ -2765,16 +2869,21 @@ function OnlineParty({
     shortcutInkRef.current = activateInkItem;
   });
 
-  const finishLocalPlayer = (status: "won" | "lost") => {
+  const finishLocalPlayer = (
+    status: "won" | "lost",
+    reason: FinishReason = "topout",
+  ) => {
     if (status !== "lost") return;
+    setLocalEndReason(reason);
     if (roleRef.current === "host") {
       eliminatePlayer(localIdRef.current);
     } else if (realtimeChannelRef.current) {
-      sendRealtimePacket({ type: "finish", status: "lost" });
+      sendRealtimePacket({ type: "finish", status: "lost", reason });
     } else if (hostConnectionRef.current?.open) {
       hostConnectionRef.current.send({
         type: "finish",
         status: "lost",
+        reason,
       } satisfies RoomPacket);
     }
   };
@@ -2818,6 +2927,7 @@ function OnlineParty({
   const leaveRoom = () => {
     clearConnectionTimeout();
     clearCountdown();
+    clearResultReveal();
     connectionAttemptRef.current += 1;
     removeRealtimeChannel();
     connectionsRef.current.forEach((connection) => connection.close());
@@ -2833,7 +2943,10 @@ function OnlineParty({
     setLocalId("");
     setRoomCode("");
     setRole(null);
+    setWinnerId("");
     setWinnerName("");
+    setShowResultCard(false);
+    setLocalEndReason("topout");
     setRoomError("");
     setConnectionStatus("");
     setAttackLogs([]);
@@ -2853,6 +2966,7 @@ function OnlineParty({
     () => () => {
       clearConnectionTimeout();
       clearCountdown();
+      clearResultReveal();
       removeRealtimeChannel();
       connectionsRef.current.forEach((connection) => connection.close());
       hostConnectionRef.current?.close();
@@ -2863,6 +2977,18 @@ function OnlineParty({
 
   const localPlayer = players.find((player) => player.id === localId);
   const remotePlayers = players.filter((player) => player.id !== localId);
+  const localMatchOutcome =
+    phase === "ended" && localPlayer && !localPlayer.spectating
+      ? localPlayer.id === winnerId
+        ? "won"
+        : "lost"
+      : null;
+  const localWon = localMatchOutcome === "won";
+  const matchEndDetail = localWon
+    ? "LAST PLAYER STANDING"
+    : localEndReason === "garbage"
+      ? "TOP OUT · GARBAGE PRESSURE"
+      : "TOP OUT · STACK REACHED THE CEILING";
   const isSpectating = Boolean(
     localPlayer && (!localPlayer.alive || localPlayer.spectating),
   );
@@ -3230,6 +3356,8 @@ function OnlineParty({
                   controls={SINGLE_CONTROLS}
                   rules={matchRules}
                   mode="versus"
+                  matchOutcome={localMatchOutcome}
+                  mobileControlLayout={mobileControlLayout}
                   garbage={garbageSignal}
                   ink={inkSignal}
                   onAttack={sendAttack}
@@ -3293,7 +3421,7 @@ function OnlineParty({
               />
             ))}
           </div>
-          {phase !== "ended" && (
+          {(phase !== "ended" || !showResultCard) && (
             <PartyChat
               messages={chatMessages}
               value={chatText}
@@ -3303,7 +3431,14 @@ function OnlineParty({
           )}
         </aside>
       </div>
-      {phase === "ended" && (
+      {phase === "ended" && !showResultCard && (
+        <div className="winner-reveal" aria-live="assertive">
+          <span>{localWon ? "YOU WIN" : "MATCH OVER"}</span>
+          <strong>{winnerName}</strong>
+          <em>{matchEndDetail}</em>
+        </div>
+      )}
+      {phase === "ended" && showResultCard && (
         <div
           aria-label="경기 결과"
           aria-modal="true"
@@ -3322,6 +3457,7 @@ function OnlineParty({
             </div>
             <p>VICTORY</p>
             <h2>{winnerName}</h2>
+            <small className="result-end-reason">{matchEndDetail}</small>
             <div className="result-list">
               {standings.map((player, index) => (
                 <div
@@ -3689,6 +3825,9 @@ export default function GameClient() {
               username: accountName.toUpperCase(),
               guest: false,
               userId: account.id,
+              mobileControlLayout: cleanMobileControlLayout(
+                account.user_metadata?.mobile_control_layout,
+              ),
             });
             return;
           }
@@ -3723,6 +3862,9 @@ export default function GameClient() {
             username: username.toUpperCase(),
             guest: false,
             userId: session.user.id,
+            mobileControlLayout: cleanMobileControlLayout(
+              session.user.user_metadata?.mobile_control_layout,
+            ),
           });
         }
       }
@@ -4042,6 +4184,9 @@ export default function GameClient() {
               defaultPlayerName={identity?.username ?? "PLAYER"}
               initialRoomCode={inviteRoomCode}
               canAutoJoin={identityReady && Boolean(identity)}
+              mobileControlLayout={
+                identity?.mobileControlLayout ?? "joystick"
+              }
               onPlayingChange={handleMultiplayerPlayingChange}
               onMatchResult={saveGameResult}
               key={run}
@@ -4059,6 +4204,9 @@ export default function GameClient() {
                 controls={SINGLE_CONTROLS}
                 rules={rules}
                 mode={screen}
+                mobileControlLayout={
+                  identity?.mobileControlLayout ?? "joystick"
+                }
                 onResult={saveGameResult}
               />
               <aside className="mission-panel">
@@ -4117,6 +4265,7 @@ export default function GameClient() {
           canClose={Boolean(identity)}
           recoveryMode={recoveryMode}
           onIdentity={saveIdentity}
+          onIdentityUpdate={setIdentity}
           onSignOut={signOutIdentity}
           onRecoveryComplete={() => setRecoveryMode(false)}
           onClose={() => setIdentityOpen(false)}

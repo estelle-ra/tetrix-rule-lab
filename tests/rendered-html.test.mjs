@@ -173,6 +173,10 @@ test("ships without starter-only assets", async () => {
   assert.match(gameClient, /블록 오른쪽으로 한 칸 이동/);
   assert.match(gameClient, /setInkSignal\(\{ id: 0 \}\)/);
   assert.match(gameClient, /className="match-result-layer"/);
+  assert.match(gameClient, /className="winner-reveal"/);
+  assert.match(gameClient, /showResultCard/);
+  assert.match(gameClient, /GARBAGE PRESSURE/);
+  assert.match(gameClient, /matchOutcome/);
   assert.match(gameClient, /MATCH COMPLETE/);
   assert.match(gameClient, /HORIZONTAL_DAS_MS = 140/);
   assert.match(gameClient, /HORIZONTAL_ARR_MS = 54/);
@@ -186,6 +190,9 @@ test("ships without starter-only assets", async () => {
   assert.match(globalCss, /\.mobile-opponent-strip/);
   assert.match(globalCss, /grid-template-areas: "hold board next"/);
   assert.match(globalCss, /\.match-result-card/);
+  assert.match(globalCss, /\.winner-reveal/);
+  assert.match(globalCss, /\.touch-direction/);
+  assert.match(globalCss, /\.control-layout-options/);
   assert.match(globalCss, /\.touch-step/);
   assert.match(globalCss, /var\(--visual-viewport-height\)/);
   assert.doesNotMatch(gameClient, /online-mode-label/);
@@ -236,8 +243,12 @@ test("ships without starter-only assets", async () => {
   assert.match(authGate, /CREATE ACCOUNT/);
   assert.match(authGate, /SEND RESET LINK/);
   assert.match(authGate, /ProfileDashboard/);
+  assert.match(authGate, /mobile_control_layout/);
   assert.match(profileDashboard, /모드별 최고 기록/);
   assert.match(profileDashboard, /send_friend_request/);
+  assert.match(profileDashboard, /className="profile-refresh"/);
+  assert.match(profileDashboard, /MOBILE CONTROLS/);
+  assert.match(profileDashboard, /mobile_control_layout/);
   assert.match(profileDashboard, /친구 기록 랭킹/);
   assert.match(migration, /alter table public\.profiles enable row level security/);
   assert.match(migration, /is_username_available/);

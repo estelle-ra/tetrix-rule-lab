@@ -4,10 +4,13 @@ import { useMemo, useState } from "react";
 import { supabase, supabaseConfig } from "./lib/supabase";
 import ProfileDashboard from "./ProfileDashboard";
 
+export type MobileControlLayout = "joystick" | "buttons";
+
 export type PlayerIdentity = {
   username: string;
   guest: boolean;
   userId?: string;
+  mobileControlLayout?: MobileControlLayout;
 };
 
 type View = "login" | "signup" | "forgot" | "guest" | "profile" | "update";
@@ -66,6 +69,7 @@ export default function AuthGate({
   canClose,
   recoveryMode,
   onIdentity,
+  onIdentityUpdate,
   onSignOut,
   onRecoveryComplete,
   onClose,
@@ -74,6 +78,7 @@ export default function AuthGate({
   canClose: boolean;
   recoveryMode: boolean;
   onIdentity: (identity: PlayerIdentity) => void;
+  onIdentityUpdate: (identity: PlayerIdentity) => void;
   onSignOut: () => void;
   onRecoveryComplete: () => void;
   onClose: () => void;
@@ -174,7 +179,10 @@ export default function AuthGate({
         password,
         options: {
           emailRedirectTo: currentPageUrl(),
-          data: { username: normalizedUsername },
+          data: {
+            username: normalizedUsername,
+            mobile_control_layout: "joystick",
+          },
         },
       });
       if (signupError) throw signupError;
@@ -299,6 +307,15 @@ export default function AuthGate({
                   <ProfileDashboard
                     userId={identity.userId}
                     username={identity.username}
+                    mobileControlLayout={
+                      identity.mobileControlLayout ?? "joystick"
+                    }
+                    onMobileControlLayoutChange={(mobileControlLayout) =>
+                      onIdentityUpdate({
+                        ...identity,
+                        mobileControlLayout,
+                      })
+                    }
                   />
                 )}
                 <button

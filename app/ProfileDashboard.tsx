@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import type { MobileControlLayout } from "./AuthGate";
 import { supabase } from "./lib/supabase";
 
 type Mode = "sprint" | "blitz" | "zen" | "versus";
@@ -78,9 +79,13 @@ function friendlyError(error: unknown) {
 export default function ProfileDashboard({
   userId,
   username,
+  mobileControlLayout,
+  onMobileControlLayoutChange,
 }: {
   userId: string;
   username: string;
+  mobileControlLayout: MobileControlLayout;
+  onMobileControlLayoutChange: (layout: MobileControlLayout) => void;
 }) {
   const [profile, setProfile] = useState<ProfileRow | null>(null);
   const [records, setRecords] = useState<RecordRow[]>([]);
@@ -264,6 +269,29 @@ export default function ProfileDashboard({
     setSearchResults((data ?? []) as ProfileRow[]);
   };
 
+  const saveMobileControlLayout = async (
+    nextLayout: MobileControlLayout,
+  ) => {
+    if (!supabase || nextLayout === mobileControlLayout) return;
+    setBusy(true);
+    setError("");
+    setMessage("");
+    const { error: updateError } = await supabase.auth.updateUser({
+      data: { mobile_control_layout: nextLayout },
+    });
+    if (updateError) {
+      setError(friendlyError(updateError));
+    } else {
+      onMobileControlLayoutChange(nextLayout);
+      setMessage(
+        nextLayout === "joystick"
+          ? "모바일 조작을 조이스틱형으로 저장했습니다."
+          : "모바일 조작을 좌·아래·우 버튼형으로 저장했습니다.",
+      );
+    }
+    setBusy(false);
+  };
+
   const currentLevel = profile?.level ?? 1;
   const experience = profile?.experience ?? 0;
   const currentFloor = (currentLevel - 1) ** 2 * 500;
@@ -328,7 +356,16 @@ export default function ProfileDashboard({
             <span>02 / FRIENDS</span>
             <h3>친구 관리</h3>
           </div>
-          <strong>{friendIds.length} FRIENDS</strong>
+          <div className="profile-head-actions">
+            <strong>{friendIds.length} FRIENDS</strong>
+            <button
+              className="profile-refresh"
+              disabled={busy}
+              onClick={() => void load()}
+            >
+              ↻ REFRESH
+            </button>
+          </div>
         </div>
         <form
           className="friend-search"
@@ -527,6 +564,40 @@ export default function ProfileDashboard({
               이 모드의 친구 기록이 아직 없습니다.
             </p>
           )}
+        </div>
+      </section>
+
+      <section className="profile-section">
+        <div className="profile-section-head">
+          <div>
+            <span>04 / MOBILE CONTROLS</span>
+            <h3>모바일 이동키 사전 설정</h3>
+          </div>
+        </div>
+        <p className="control-layout-intro">
+          로그인 계정에 저장되며 모바일 게임을 시작할 때 자동으로 적용됩니다.
+        </p>
+        <div className="control-layout-options">
+          <button
+            className={
+              mobileControlLayout === "joystick" ? "active" : ""
+            }
+            disabled={busy}
+            onClick={() => void saveMobileControlLayout("joystick")}
+          >
+            <span>DEFAULT</span>
+            <strong>조이스틱형</strong>
+            <small>드래그해서 좌·우·아래로 연속 이동</small>
+          </button>
+          <button
+            className={mobileControlLayout === "buttons" ? "active" : ""}
+            disabled={busy}
+            onClick={() => void saveMobileControlLayout("buttons")}
+          >
+            <span>BUTTONS</span>
+            <strong>← ↓ → 버튼형</strong>
+            <small>누르는 위치가 고정된 세 개의 이동 버튼</small>
+          </button>
         </div>
       </section>
 
