@@ -407,18 +407,32 @@ function detectTSpin(
   return frontCorners.every(Boolean) || lastKickIndex === 4 ? "full" : "mini";
 }
 
-function shuffledBag(): PieceName[] {
+function createSeededRandom(seed: number): () => number {
+  let state = (seed >>> 0) || 0x6d2b79f5;
+  return () => {
+    state = (state + 0x6d2b79f5) >>> 0;
+    let value = state;
+    value = Math.imul(value ^ (value >>> 15), value | 1);
+    value ^= value + Math.imul(value ^ (value >>> 7), value | 61);
+    return ((value ^ (value >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function shuffledBag(random: () => number = Math.random): PieceName[] {
   const bag = [...PIECES];
   for (let index = bag.length - 1; index > 0; index -= 1) {
-    const swap = Math.floor(Math.random() * (index + 1));
+    const swap = Math.floor(random() * (index + 1));
     [bag[index], bag[swap]] = [bag[swap], bag[index]];
   }
   return bag;
 }
 
-function nextQueue(queue: PieceName[]): PieceName[] {
+function nextQueue(
+  queue: PieceName[],
+  random: () => number = Math.random,
+): PieceName[] {
   let output = [...queue];
-  while (output.length < 8) output = [...output, ...shuffledBag()];
+  while (output.length < 8) output = [...output, ...shuffledBag(random)];
   return output;
 }
 
@@ -440,16 +454,23 @@ function enabledItems(rules: Rules): ItemType[] {
   return pool.length ? pool : [...ITEM_TYPES];
 }
 
-function randomItem(rules: Rules): ItemType {
+function randomItem(
+  rules: Rules,
+  random: () => number = Math.random,
+): ItemType {
   const pool = enabledItems(rules);
-  return pool[Math.floor(Math.random() * pool.length)];
+  return pool[Math.floor(random() * pool.length)];
 }
 
-function startingItemInventory(rules: Rules): ItemType[] {
+function startingItemInventory(rules: Rules, seed?: number): ItemType[] {
   if (!rules.itemsEnabled || rules.itemMode === "blocks") return [];
+  const random =
+    seed === undefined
+      ? Math.random
+      : createSeededRandom((seed ^ 0x51f15e5d) >>> 0);
   return Array.from(
     { length: Math.max(1, rules.itemLimit || DEFAULT_RULES.itemLimit) },
-    () => randomItem(rules),
+    () => randomItem(rules, random),
   );
 }
 
@@ -520,6 +541,7 @@ type BoardProps = {
   controls: Controls;
   rules: Rules;
   mode: "sprint" | "blitz" | "zen" | "versus";
+  pieceSeed?: number;
   compact?: boolean;
   garbage?: { id: number; amount: number };
   ink?: { id: number };
@@ -538,6 +560,7 @@ function GameBoard({
   controls,
   rules,
   mode,
+  pieceSeed,
   compact = false,
   garbage,
   ink,
@@ -550,7 +573,21 @@ function GameBoard({
   onSnapshot,
   onResult,
 }: BoardProps) {
-  const initialQueue = useMemo(() => nextQueue([]), []);
+  const pieceRandom = useMemo(
+    () =>
+      pieceSeed === undefined ? Math.random : createSeededRandom(pieceSeed),
+    [pieceSeed],
+  );
+  const itemRandom = useMemo(
+    () =>
+      pieceSeed === undefined
+        ? Math.random
+        : createSeededRandom((pieceSeed ^ 0x3c6ef372) >>> 0),
+    [pieceSeed],
+  );
+  const pieceRandomRef = useRef(pieceRandom);
+  const itemRandomRef = useRef(itemRandom);
+  const initialQueue = useMemo(() => nextQueue([], pieceRandom), [pieceRandom]);
   const [board, setBoard] = useState<Board>(() => emptyBoard());
   const [active, setActive] = useState<Piece>(() => spawn(initialQueue[0]));
   const [queue, setQueue] = useState<PieceName[]>(() => initialQueue.slice(1));
@@ -708,7 +745,7 @@ function GameBoard({
             fullRowIndexes.filter((rowIndex) => rowIndex > marker.y).length,
         }));
 
-      const replenished = nextQueue(queue);
+      const replenished = nextQueue(queue, pieceRandomRef.current);
       const nextPiece = spawn(replenished[0]);
       const nextLines = lines + cleared;
       const nextCombo = cleared ? combo + 1 : -1;
@@ -731,7 +768,7 @@ function GameBoard({
         rules.itemsEnabled &&
           rules.itemMode === "blocks" &&
           piecesPlacedRef.current % 4 === 0
-          ? randomItem(rules)
+          ? randomItem(rules, itemRandomRef.current)
           : null,
       );
       setCanHold(true);
@@ -955,7 +992,7 @@ function GameBoard({
       }
 
       if (itemEffect.item === "odd") {
-        setQueue((current) => (["W", ...current] as PieceName[]).slice(0, 8));
+        setQueue((current) => ["W" as PieceName, ...current]);
       }
 
       if (itemEffect.item === "star") {
@@ -1103,7 +1140,7 @@ function GameBoard({
       setHeld(active.type);
       setActive(spawn(held));
     } else {
-      const replenished = nextQueue(queue);
+      const replenished = nextQueue(queue, pieceRandomRef.current);
       setHeld(active.type);
       setActive(spawn(replenished[0]));
       setQueue(replenished.slice(1));
@@ -2721,7 +2758,9 @@ function OnlineParty({
       setItemEffectSignal(null);
       setInkedPlayers({});
       setPlayerItemEffects({});
-      replaceItemInventory(startingItemInventory(packet.rules));
+      replaceItemInventory(
+        startingItemInventory(packet.rules, packet.matchId),
+      );
       beginCountdown(packet.startAt);
     }
     if (packet.type === "snapshot" && packet.playerId) {
@@ -3216,7 +3255,9 @@ function OnlineParty({
     manualTargetsRef.current.clear();
     itemUsesRef.current.clear();
     setSelectedTargetId("");
-    replaceItemInventory(startingItemInventory(rulesRef.current));
+    replaceItemInventory(
+      startingItemInventory(rulesRef.current, nextMatchId),
+    );
     setAttackLogs([]);
     setInkSignal({ id: 0 });
     setItemEffectSignal(null);
@@ -3854,6 +3895,7 @@ function OnlineParty({
                   controls={SINGLE_CONTROLS}
                   rules={matchRules}
                   mode="versus"
+                  pieceSeed={matchId}
                   matchOutcome={localMatchOutcome}
                   mobileControlLayout={mobileControlLayout}
                   garbage={garbageSignal}

@@ -164,6 +164,17 @@ test("ships without starter-only assets", async () => {
   assert.match(gameClient, /itemMode: "stock" \| "blocks"/);
   assert.match(gameClient, /SPEED_EFFECT_MS = 7000/);
   assert.match(gameClient, /SPIN_EFFECT_MS = 5000/);
+  assert.match(gameClient, /function createSeededRandom/);
+  assert.match(gameClient, /pieceSeed=\{matchId\}/);
+  assert.match(gameClient, /nextQueue\(queue, pieceRandomRef\.current\)/);
+  assert.match(
+    gameClient,
+    /startingItemInventory\(packet\.rules, packet\.matchId\)/,
+  );
+  assert.match(
+    gameClient,
+    /setQueue\(\(current\) => \["W" as PieceName, \.\.\.current\]\)/,
+  );
   assert.match(gameClient, /function starHoleCells/);
   assert.match(gameClient, /ITEM BLOCKS/);
   assert.match(gameClient, /onItemPickup/);
