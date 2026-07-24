@@ -7,6 +7,7 @@ import {
   useRef,
   useState,
 } from "react";
+import Image from "next/image";
 import type {
   CSSProperties,
   PointerEvent as ReactPointerEvent,
@@ -4089,12 +4090,15 @@ export default function GameClient() {
     >
       <header className="topbar">
         <button className="brand" onClick={goHome}>
-          <span className="brand-mark">
-            <i />
-            <i />
-            <i />
-            <i />
-          </span>
+          <Image
+            alt=""
+            aria-hidden="true"
+            className="brand-mark"
+            height={42}
+            src={`${GAME_ASSET_BASE_PATH}icon.svg`}
+            unoptimized
+            width={42}
+          />
           <span>
             <strong>TETSTAR</strong>
             <small>RULE LAB</small>
@@ -4151,7 +4155,7 @@ export default function GameClient() {
                   <ModeCard
                     accent="orange"
                     code="40L"
-                    title="40 LINES"
+                    title="LINES"
                     description="40줄을 가장 빠르게 클리어"
                     meta="SPRINT / SOLO"
                     onClick={() => start("sprint")}

@@ -35,7 +35,8 @@ test("server-renders the complete game selector", async () => {
 
   const html = await response.text();
   assert.match(html, /TETSTAR/);
-  assert.match(html, /40 LINES/);
+  assert.match(html, /40L/);
+  assert.match(html, />LINES</);
   assert.match(html, /BLITZ/);
   assert.match(html, /ZEN/);
   assert.match(html, /SINGLEPLAYER/);
@@ -125,6 +126,8 @@ test("ships without starter-only assets", async () => {
   assert.match(packageJson, /"peerjs":/);
   assert.doesNotMatch(packageJson, /react-loading-skeleton/);
   assert.match(gameClient, /playersRef\.current\.length >= 8/);
+  assert.match(gameClient, /src=\{`\$\{GAME_ASSET_BASE_PATH\}icon\.svg`\}/);
+  assert.match(gameClient, /import Image from "next\/image"/);
   assert.match(gameClient, /reason: "ROOM_FULL"/);
   assert.match(gameClient, /peer\.connect\(roomPeerId\(code\)/);
   assert.match(gameClient, /searchParams\.set\("room", roomCode\)/);
