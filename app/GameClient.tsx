@@ -20,7 +20,8 @@ import AuthGate, {
 } from "./AuthGate";
 import { supabase } from "./lib/supabase";
 
-type PieceName = "I" | "J" | "L" | "O" | "S" | "T" | "Z";
+type PieceName = "I" | "J" | "L" | "O" | "S" | "T" | "Z" | "W";
+type ItemType = "ink" | "speed" | "odd" | "spin" | "star";
 type Cell = PieceName | "G" | null;
 type RenderCell = Exclude<Cell, null> | "ghost" | "";
 type Board = Cell[][];
@@ -67,7 +68,9 @@ type Rules = {
   ghost: boolean;
   targetMode: "cycle" | "random" | "all" | "manual";
   itemsEnabled: boolean;
-  inkLimit: number;
+  itemMode: "stock" | "blocks";
+  itemLimit: number;
+  itemPool: ItemType[];
 };
 
 type GameSnapshot = {
@@ -75,6 +78,8 @@ type GameSnapshot = {
   lines: number;
   score: number;
   status: Status;
+  items?: Array<{ index: number; item: ItemType }>;
+  effect?: ItemType | null;
 };
 
 type GameResult = {
@@ -108,7 +113,13 @@ type AttackLog = {
   fromName: string;
   toName: string;
   amount: number;
-  kind: "garbage" | "ink";
+  kind: "garbage" | ItemType;
+};
+
+type BoardItem = {
+  x: number;
+  y: number;
+  item: ItemType;
 };
 
 type ChatMessage = {
@@ -140,9 +151,16 @@ type RoomPacket =
   | { type: "attack"; amount: number }
   | { type: "garbage"; id: number; amount: number }
   | { type: "target-select"; targetId: string }
-  | { type: "item-use"; item: "ink"; targetId: string }
+  | { type: "item-use"; item: ItemType; targetId: string }
   | { type: "ink"; id: number }
   | { type: "ink-state"; playerId: string; until: number }
+  | { type: "item-effect"; id: number; item: Exclude<ItemType, "ink"> }
+  | {
+      type: "item-state";
+      playerId: string;
+      item: ItemType;
+      until: number;
+    }
   | { type: "attack-log"; log: AttackLog }
   | { type: "chat-submit"; text: string }
   | { type: "chat"; message: ChatMessage }
@@ -177,7 +195,45 @@ const JOYSTICK_DEADZONE = 22;
 const JOYSTICK_HORIZONTAL_DAS_MS = 165;
 const JOYSTICK_HORIZONTAL_ARR_MS = 66;
 const INK_EFFECT_MS = 4200;
+const SPEED_EFFECT_MS = 7000;
+const SPIN_EFFECT_MS = 5000;
 const PIECES: PieceName[] = ["I", "J", "L", "O", "S", "T", "Z"];
+const ITEM_TYPES: ItemType[] = ["ink", "speed", "odd", "spin", "star"];
+const ITEM_META: Record<
+  ItemType,
+  { label: string; short: string; icon: string; description: string }
+> = {
+  ink: {
+    label: "먹물",
+    short: "INK",
+    icon: "●",
+    description: "상대 보드를 4.2초 가립니다.",
+  },
+  speed: {
+    label: "급가속",
+    short: "SPEED",
+    icon: "»",
+    description: "상대 낙하 속도를 7초간 빠르게 만듭니다.",
+  },
+  odd: {
+    label: "괴상 블록",
+    short: "ODD",
+    icon: "✚",
+    description: "상대의 다음 블록을 5칸 특수 블록으로 바꿉니다.",
+  },
+  spin: {
+    label: "스핀 잠금",
+    short: "NO SPIN",
+    icon: "⊘",
+    description: "상대의 회전을 5초간 막습니다.",
+  },
+  star: {
+    label: "별 구멍",
+    short: "STAR",
+    icon: "★",
+    description: "상대가 쌓은 블록에 별 모양 구멍을 냅니다.",
+  },
+};
 const GAME_THEMES: GameTheme[] = ["megacity", "orbit", "refinery"];
 const CONFIGURED_SITE_URL = process.env.NEXT_PUBLIC_SITE_URL;
 const GAME_ASSET_BASE_PATH = CONFIGURED_SITE_URL
@@ -225,6 +281,11 @@ const SHAPES: Record<PieceName, number[][]> = {
     [0, 1, 1],
     [0, 0, 0],
   ],
+  W: [
+    [0, 1, 0],
+    [1, 1, 1],
+    [0, 1, 0],
+  ],
 };
 
 // SRS offsets converted to this board's coordinate system, where +Y is down.
@@ -256,7 +317,9 @@ const DEFAULT_RULES: Rules = {
   ghost: true,
   targetMode: "cycle",
   itemsEnabled: false,
-  inkLimit: 2,
+  itemMode: "stock",
+  itemLimit: 3,
+  itemPool: [...ITEM_TYPES],
 };
 
 const SINGLE_CONTROLS: Controls = {
@@ -368,6 +431,52 @@ function spawn(type: PieceName): Piece {
   };
 }
 
+function enabledItems(rules: Rules): ItemType[] {
+  const pool = Array.isArray(rules.itemPool)
+    ? rules.itemPool.filter((item): item is ItemType =>
+        ITEM_TYPES.includes(item),
+      )
+    : [];
+  return pool.length ? pool : [...ITEM_TYPES];
+}
+
+function randomItem(rules: Rules): ItemType {
+  const pool = enabledItems(rules);
+  return pool[Math.floor(Math.random() * pool.length)];
+}
+
+function startingItemInventory(rules: Rules): ItemType[] {
+  if (!rules.itemsEnabled || rules.itemMode === "blocks") return [];
+  return Array.from(
+    { length: Math.max(1, rules.itemLimit || DEFAULT_RULES.itemLimit) },
+    () => randomItem(rules),
+  );
+}
+
+function starHoleCells(board: Board): Array<[number, number]> {
+  const firstOccupied = board.findIndex((row) => row.some(Boolean));
+  const centerY =
+    firstOccupied < 0
+      ? HEIGHT - 4
+      : Math.min(HEIGHT - 3, Math.max(3, firstOccupied + 2));
+  const centerX = Math.floor(WIDTH / 2) - 1;
+  const offsets: Array<[number, number]> = [
+    [0, -2],
+    [-1, -1],
+    [0, -1],
+    [1, -1],
+    [-2, 0],
+    [-1, 0],
+    [0, 0],
+    [1, 0],
+    [2, 0],
+    [-1, 1],
+    [1, 1],
+    [0, 2],
+  ];
+  return offsets.map(([x, y]) => [centerX + x, centerY + y]);
+}
+
 function formatTime(totalSeconds: number) {
   const minutes = Math.floor(totalSeconds / 60);
   const seconds = totalSeconds % 60;
@@ -385,13 +494,17 @@ function formatResultTime(timeMs: number) {
 function MiniPiece({ type }: { type: PieceName | null }) {
   if (!type) return <div className="mini-empty">—</div>;
   const matrix = SHAPES[type];
-  const cells = Array.from({ length: 8 }, (_, index) => {
+  const rows = type === "W" ? 3 : 2;
+  const cells = Array.from({ length: rows * 4 }, (_, index) => {
     const y = Math.floor(index / 4);
     const x = index % 4;
     return Boolean(matrix[y]?.[x]);
   });
   return (
-    <div className="mini-grid" aria-label={`${type} 블록`}>
+    <div
+      className={`mini-grid ${rows === 3 ? "mini-grid-tall" : ""}`}
+      aria-label={`${type} 블록`}
+    >
       {cells.map((filled, index) => (
         <span
           className={filled ? `mini-cell piece-${type}` : "mini-cell"}
@@ -410,9 +523,11 @@ type BoardProps = {
   compact?: boolean;
   garbage?: { id: number; amount: number };
   ink?: { id: number };
+  itemEffect?: { id: number; item: Exclude<ItemType, "ink"> };
   matchOutcome?: "won" | "lost" | null;
   mobileControlLayout?: MobileControlLayout;
   onAttack?: (amount: number) => void;
+  onItemPickup?: (item: ItemType) => void;
   onFinish?: (status: "won" | "lost", reason?: FinishReason) => void;
   onSnapshot?: (snapshot: GameSnapshot) => void;
   onResult?: (result: GameResult) => void | Promise<void>;
@@ -426,9 +541,11 @@ function GameBoard({
   compact = false,
   garbage,
   ink,
+  itemEffect,
   matchOutcome = null,
   mobileControlLayout = "joystick",
   onAttack,
+  onItemPickup,
   onFinish,
   onSnapshot,
   onResult,
@@ -460,6 +577,10 @@ function GameBoard({
   const [joystickVector, setJoystickVector] = useState({ x: 0, y: 0 });
   const [joystickOrigin, setJoystickOrigin] = useState({ x: 0, y: 0 });
   const [joystickActive, setJoystickActive] = useState(false);
+  const [boardItems, setBoardItems] = useState<BoardItem[]>([]);
+  const [activeItem, setActiveItem] = useState<ItemType | null>(null);
+  const [speedActive, setSpeedActive] = useState(false);
+  const [spinLocked, setSpinLocked] = useState(false);
   const finishSent = useRef(false);
   const resultSent = useRef(false);
   const startedAt = useRef(0);
@@ -477,10 +598,18 @@ function GameBoard({
   const joystickPointer = useRef<number | null>(null);
   const joystickDirection = useRef<GameAction | null>(null);
   const joystickOriginRef = useRef({ x: 0, y: 0 });
+  const piecesPlacedRef = useRef(0);
+  const speedTimerRef = useRef<number | null>(null);
+  const spinTimerRef = useRef<number | null>(null);
+  const boardRef = useRef(board);
 
   useEffect(() => {
     startedAt.current = Date.now();
   }, []);
+
+  useEffect(() => {
+    boardRef.current = board;
+  }, [board]);
 
   useEffect(() => {
     if (mode !== "versus" || !matchOutcome) return;
@@ -544,6 +673,21 @@ function GameBoard({
         return;
       }
 
+      const markers = [...boardItems];
+      if (activeItem) {
+        const lockedCells = pieceCells(piece).filter(
+          ([x, y]) => x >= 0 && x < WIDTH && y >= 0 && y < HEIGHT,
+        );
+        const itemCell = lockedCells[Math.floor(lockedCells.length / 2)];
+        if (itemCell) {
+          markers.push({
+            x: itemCell[0],
+            y: itemCell[1],
+            item: activeItem,
+          });
+        }
+      }
+
       const fullRowIndexes = merged.reduce<number[]>(
         (indexes, row, index) =>
           row.every(Boolean) ? [...indexes, index] : indexes,
@@ -552,6 +696,17 @@ function GameBoard({
       const cleared = fullRowIndexes.length;
       const cleaned = merged.filter((row) => !row.every(Boolean));
       while (cleaned.length < HEIGHT) cleaned.unshift(Array(WIDTH).fill(null));
+      const collectedItems = markers.filter((marker) =>
+        fullRowIndexes.includes(marker.y),
+      );
+      const remainingItems = markers
+        .filter((marker) => !fullRowIndexes.includes(marker.y))
+        .map((marker) => ({
+          ...marker,
+          y:
+            marker.y +
+            fullRowIndexes.filter((rowIndex) => rowIndex > marker.y).length,
+        }));
 
       const replenished = nextQueue(queue);
       const nextPiece = spawn(replenished[0]);
@@ -568,8 +723,17 @@ function GameBoard({
             : (baseScores[cleared] ?? 1200);
 
       setBoard(cleaned);
+      setBoardItems(remainingItems);
       setActive(nextPiece);
       setQueue(replenished.slice(1));
+      piecesPlacedRef.current += 1;
+      setActiveItem(
+        rules.itemsEnabled &&
+          rules.itemMode === "blocks" &&
+          piecesPlacedRef.current % 4 === 0
+          ? randomItem(rules)
+          : null,
+      );
       setCanHold(true);
       setLines(nextLines);
       setCombo(nextCombo);
@@ -579,6 +743,7 @@ function GameBoard({
           clearScore * (1 + Math.floor(nextLines / 10)) +
           (cleared ? Math.max(0, nextCombo) * 50 : 0),
       );
+      collectedItems.forEach((marker) => onItemPickup?.(marker.item));
 
       if (cleared) {
         const effect = {
@@ -640,13 +805,16 @@ function GameBoard({
     },
     [
       board,
+      boardItems,
       combo,
+      activeItem,
       finish,
       lines,
       mode,
       onAttack,
+      onItemPickup,
       queue,
-      rules.attack,
+      rules,
     ],
   );
 
@@ -662,10 +830,14 @@ function GameBoard({
 
   useEffect(() => {
     if (status !== "playing") return;
-    const gravity = Math.max(90, rules.gravity - Math.floor(lines / 10) * 55);
+    const normalGravity = Math.max(
+      90,
+      rules.gravity - Math.floor(lines / 10) * 55,
+    );
+    const gravity = speedActive ? Math.max(55, normalGravity * 0.24) : normalGravity;
     const timer = window.setInterval(() => stepDownRef.current(), gravity);
     return () => window.clearInterval(timer);
-  }, [lines, rules.gravity, status]);
+  }, [lines, rules.gravity, speedActive, status]);
 
   useEffect(() => {
     if (status !== "playing") return;
@@ -738,6 +910,11 @@ function GameBoard({
         }
         return shifted;
       });
+      setBoardItems((current) =>
+        current
+          .map((marker) => ({ ...marker, y: marker.y - Math.min(garbage.amount, 8) }))
+          .filter((marker) => marker.y >= 0),
+      );
       setFlash(`+${garbage.amount} GARBAGE`);
       clearTimer = window.setTimeout(() => setFlash(""), 620);
     }, 0);
@@ -746,6 +923,72 @@ function GameBoard({
       if (clearTimer) window.clearTimeout(clearTimer);
     };
   }, [garbage, status]);
+
+  useEffect(() => {
+    if (!itemEffect?.id || status !== "playing") return;
+    let flashTimer: number | null = null;
+    const applyTimer = window.setTimeout(() => {
+      const meta = ITEM_META[itemEffect.item];
+      setFlash(`${meta.short} ATTACK!`);
+      flashTimer = window.setTimeout(() => setFlash(""), 720);
+
+      if (itemEffect.item === "speed") {
+        if (speedTimerRef.current !== null) {
+          window.clearTimeout(speedTimerRef.current);
+        }
+        setSpeedActive(true);
+        speedTimerRef.current = window.setTimeout(() => {
+          setSpeedActive(false);
+          speedTimerRef.current = null;
+        }, SPEED_EFFECT_MS);
+      }
+
+      if (itemEffect.item === "spin") {
+        if (spinTimerRef.current !== null) {
+          window.clearTimeout(spinTimerRef.current);
+        }
+        setSpinLocked(true);
+        spinTimerRef.current = window.setTimeout(() => {
+          setSpinLocked(false);
+          spinTimerRef.current = null;
+        }, SPIN_EFFECT_MS);
+      }
+
+      if (itemEffect.item === "odd") {
+        setQueue((current) => (["W", ...current] as PieceName[]).slice(0, 8));
+      }
+
+      if (itemEffect.item === "star") {
+        const holes = starHoleCells(boardRef.current);
+        const holeKeys = new Set(holes.map(([x, y]) => `${x}:${y}`));
+        setBoard((current) =>
+          current.map((row, y) =>
+            row.map((cell, x) => (holeKeys.has(`${x}:${y}`) ? null : cell)),
+          ),
+        );
+        setBoardItems((current) =>
+          current.filter((marker) => !holeKeys.has(`${marker.x}:${marker.y}`)),
+        );
+      }
+    }, 0);
+
+    return () => {
+      window.clearTimeout(applyTimer);
+      if (flashTimer !== null) window.clearTimeout(flashTimer);
+    };
+  }, [itemEffect, status]);
+
+  useEffect(
+    () => () => {
+      if (speedTimerRef.current !== null) {
+        window.clearTimeout(speedTimerRef.current);
+      }
+      if (spinTimerRef.current !== null) {
+        window.clearTimeout(spinTimerRef.current);
+      }
+    },
+    [],
+  );
 
   const refreshLockDelay = useCallback(() => {
     if (
@@ -777,6 +1020,11 @@ function GameBoard({
 
   const rotate = useCallback(
     (direction: 1 | -1) => {
+      if (spinLocked) {
+        setFlash("SPIN LOCKED");
+        window.setTimeout(() => setFlash(""), 360);
+        return;
+      }
       const fromRotation = active.rotation;
       const toRotation = (active.rotation + direction + 4) % 4;
       const rotated = {
@@ -802,7 +1050,7 @@ function GameBoard({
         }
       }
     },
-    [active, board, refreshLockDelay],
+    [active, board, refreshLockDelay, spinLocked],
   );
 
   const clearRepeatHandles = useCallback(() => {
@@ -1075,6 +1323,21 @@ function GameBoard({
     stopRepeat("joystick");
   };
 
+  const itemRenderMap = useMemo(() => {
+    const markers = new Map<string, ItemType>();
+    boardItems.forEach((marker) => {
+      markers.set(`${marker.x}:${marker.y}`, marker.item);
+    });
+    if (activeItem && status === "playing") {
+      const activeCells = pieceCells(active).filter(
+        ([x, y]) => x >= 0 && x < WIDTH && y >= 0 && y < HEIGHT,
+      );
+      const itemCell = activeCells[Math.floor(activeCells.length / 2)];
+      if (itemCell) markers.set(`${itemCell[0]}:${itemCell[1]}`, activeItem);
+    }
+    return markers;
+  }, [active, activeItem, boardItems, status]);
+
   const rendered = useMemo(() => {
     const cells: RenderCell[][] = board.map((row) =>
       row.map((cell) => cell ?? ""),
@@ -1109,10 +1372,24 @@ function GameBoard({
         lines,
         score,
         status,
+        items: Array.from(itemRenderMap.entries()).map(([position, item]) => {
+          const [x, y] = position.split(":").map(Number);
+          return { index: y * WIDTH + x, item };
+        }),
+        effect: speedActive ? "speed" : spinLocked ? "spin" : null,
       });
     }, delay);
     return () => window.clearTimeout(timer);
-  }, [lines, onSnapshot, rendered, score, status]);
+  }, [
+    itemRenderMap,
+    lines,
+    onSnapshot,
+    rendered,
+    score,
+    speedActive,
+    spinLocked,
+    status,
+  ]);
 
   const controlLabel = "←/→ 이동 · ↑/Z 회전 · Space 드롭 · Shift 홀드";
 
@@ -1153,9 +1430,19 @@ function GameBoard({
             {rendered.flatMap((row, y) =>
               row.map((cell, x) => (
                 <span
-                  className={`cell ${cell ? `piece-${cell}` : ""}`}
+                  className={`cell ${cell ? `piece-${cell}` : ""} ${
+                    itemRenderMap.has(`${x}:${y}`)
+                      ? `item-cell item-${itemRenderMap.get(`${x}:${y}`)}`
+                      : ""
+                  }`}
                   key={`${x}-${y}`}
-                />
+                >
+                  {itemRenderMap.has(`${x}:${y}`) && (
+                    <b aria-hidden="true">
+                      {ITEM_META[itemRenderMap.get(`${x}:${y}`)!].icon}
+                    </b>
+                  )}
+                </span>
               )),
             )}
           </div>
@@ -1253,6 +1540,16 @@ function GameBoard({
               <i />
               <i />
               <i />
+            </div>
+          )}
+          {(speedActive || spinLocked) && status === "playing" && (
+            <div
+              className={`board-item-status ${
+                spinLocked ? "effect-spin" : "effect-speed"
+              }`}
+              role="status"
+            >
+              {spinLocked ? "NO SPIN" : "SPEED UP"}
             </div>
           )}
           {status !== "playing" && !(mode === "versus" && matchOutcome) && (
@@ -1556,9 +1853,11 @@ function RemoteBoard({
   targeting,
   hotkey,
   inked,
-  inkRemaining,
+  effect,
+  currentItem,
+  itemRemaining,
   onSelect,
-  onInk,
+  onItem,
 }: {
   player: RoomPlayer;
   isSelf?: boolean;
@@ -1566,14 +1865,20 @@ function RemoteBoard({
   targeting?: boolean;
   hotkey?: number;
   inked?: boolean;
-  inkRemaining?: number;
+  effect?: ItemType | null;
+  currentItem?: ItemType | null;
+  itemRemaining?: number;
   onSelect?: () => void;
-  onInk?: () => void;
+  onItem?: () => void;
 }) {
   const cells = player.snapshot?.cells ?? Array(HEIGHT * WIDTH).fill("");
+  const itemCells = new Map(
+    (player.snapshot?.items ?? []).map((marker) => [marker.index, marker.item]),
+  );
+  const visibleEffect = effect ?? player.snapshot?.effect ?? null;
   return (
     <article
-      className={`remote-player ${!player.alive ? "remote-player-out" : ""} ${isSelf ? "remote-player-self" : ""} ${selected ? "remote-player-selected" : ""} ${targeting ? "remote-player-targetable" : ""} ${inked ? "remote-player-inked" : ""}`}
+      className={`remote-player ${!player.alive ? "remote-player-out" : ""} ${isSelf ? "remote-player-self" : ""} ${selected ? "remote-player-selected" : ""} ${targeting ? "remote-player-targetable" : ""} ${inked ? "remote-player-inked" : ""} ${visibleEffect ? `remote-player-effect-${visibleEffect}` : ""}`}
       onClick={targeting ? onSelect : undefined}
     >
       <div className="remote-player-head">
@@ -1593,6 +1898,8 @@ function RemoteBoard({
             ? player.connected
               ? inked
                 ? "INKED"
+                : visibleEffect
+                  ? ITEM_META[visibleEffect].short
                 : "LIVE"
               : "OFFLINE"
             : "OUT"}
@@ -1600,9 +1907,19 @@ function RemoteBoard({
       </div>
       <div className="remote-board-wrap">
         <div className="remote-board" aria-label={`${player.name} 상대 보드`}>
-          {cells.slice(0, HEIGHT * WIDTH).map((cell, index) => (
-            <i className={cell ? `piece-${cell}` : ""} key={index} />
-          ))}
+          {cells.slice(0, HEIGHT * WIDTH).map((cell, index) => {
+            const item = itemCells.get(index);
+            return (
+              <i
+                className={`${cell ? `piece-${cell}` : ""} ${
+                  item ? `remote-item-cell item-${item}` : ""
+                }`}
+                key={index}
+              >
+                {item && <b>{ITEM_META[item].icon}</b>}
+              </i>
+            );
+          })}
         </div>
         {inked && (
           <div
@@ -1630,16 +1947,16 @@ function RemoteBoard({
           {selected ? "TARGETED" : "SELECT"}
         </button>
       )}
-      {onInk && (
+      {onItem && currentItem && (
         <button
-          className="ink-item-button"
-          disabled={!inkRemaining || !player.alive}
+          className={`item-use-button item-use-${currentItem}`}
+          disabled={!itemRemaining || !player.alive}
           onClick={(event) => {
             event.stopPropagation();
-            onInk();
+            onItem();
           }}
         >
-          INK ×{inkRemaining}
+          {ITEM_META[currentItem].short} ×{itemRemaining}
         </button>
       )}
     </article>
@@ -1685,10 +2002,17 @@ function OnlineParty({
   const [matchRules, setMatchRules] = useState(rules);
   const [garbageSignal, setGarbageSignal] = useState({ id: 0, amount: 0 });
   const [inkSignal, setInkSignal] = useState({ id: 0 });
+  const [itemEffectSignal, setItemEffectSignal] = useState<{
+    id: number;
+    item: Exclude<ItemType, "ink">;
+  } | null>(null);
   const [inkedPlayers, setInkedPlayers] = useState<Record<string, number>>({});
+  const [playerItemEffects, setPlayerItemEffects] = useState<
+    Record<string, { item: ItemType; until: number }>
+  >({});
   const [attackLogs, setAttackLogs] = useState<AttackLog[]>([]);
   const [selectedTargetId, setSelectedTargetId] = useState("");
-  const [inkUsed, setInkUsed] = useState(0);
+  const [itemInventory, setItemInventory] = useState<ItemType[]>([]);
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [chatText, setChatText] = useState("");
   const [countdownValue, setCountdownValue] = useState(3);
@@ -1716,10 +2040,11 @@ function OnlineParty({
   const targetCursor = useRef(0);
   const manualTargetsRef = useRef(new Map<string, string>());
   const itemUsesRef = useRef(new Map<string, number>());
+  const itemInventoryRef = useRef<ItemType[]>([]);
   const shortcutSelectTargetRef = useRef<(targetId: string) => void>(
     () => undefined,
   );
-  const shortcutInkRef = useRef<(targetId: string) => void>(() => undefined);
+  const shortcutItemRef = useRef<(targetId: string) => void>(() => undefined);
 
   useEffect(() => {
     onPlayingChange(
@@ -1804,6 +2129,11 @@ function OnlineParty({
     setPlayers(next);
   };
 
+  const replaceItemInventory = (next: ItemType[]) => {
+    itemInventoryRef.current = next;
+    setItemInventory(next);
+  };
+
   const appendChat = (message: ChatMessage) => {
     const next = [...chatMessagesRef.current, message].slice(-80);
     chatMessagesRef.current = next;
@@ -1823,6 +2153,28 @@ function OnlineParty({
       () => {
         setInkedPlayers((current) => {
           if (current[playerId] !== until) return current;
+          const next = { ...current };
+          delete next[playerId];
+          return next;
+        });
+      },
+      Math.max(0, until - Date.now()),
+    );
+  };
+
+  const markPlayerItemEffect = (
+    playerId: string,
+    item: ItemType,
+    until: number,
+  ) => {
+    setPlayerItemEffects((current) => ({
+      ...current,
+      [playerId]: { item, until },
+    }));
+    window.setTimeout(
+      () => {
+        setPlayerItemEffects((current) => {
+          if (current[playerId]?.until !== until) return current;
           const next = { ...current };
           delete next[playerId];
           return next;
@@ -2004,8 +2356,13 @@ function OnlineParty({
     });
   };
 
-  const routeInkItem = (fromId: string, targetId: string) => {
+  const routeItem = (
+    fromId: string,
+    targetId: string,
+    item: ItemType,
+  ) => {
     if (!rulesRef.current.itemsEnabled) return;
+    if (!enabledItems(rulesRef.current).includes(item)) return;
     const sender = playersRef.current.find(
       (player) => player.id === fromId && player.alive && player.connected,
     );
@@ -2018,23 +2375,47 @@ function OnlineParty({
     );
     if (!sender || !target) return;
     const used = itemUsesRef.current.get(fromId) ?? 0;
-    if (used >= rulesRef.current.inkLimit) return;
+    if (
+      rulesRef.current.itemMode === "stock" &&
+      used >= rulesRef.current.itemLimit
+    ) {
+      return;
+    }
     itemUsesRef.current.set(fromId, used + 1);
     const id = Date.now() + used;
-    const until = Date.now() + INK_EFFECT_MS;
-    if (target.id === localIdRef.current) {
-      setInkSignal({ id });
+    const duration =
+      item === "ink"
+        ? INK_EFFECT_MS
+        : item === "speed"
+          ? SPEED_EFFECT_MS
+          : item === "spin"
+            ? SPIN_EFFECT_MS
+            : 1400;
+    const until = Date.now() + duration;
+    if (item === "ink") {
+      if (target.id === localIdRef.current) {
+        setInkSignal({ id });
+      } else {
+        sendRealtimePacket({ type: "ink", id }, target.id);
+      }
+      markPlayerInked(target.id, until);
+      broadcast({ type: "ink-state", playerId: target.id, until });
     } else {
-      sendRealtimePacket({ type: "ink", id }, target.id);
+      const effect = { type: "item-effect", id, item } satisfies RoomPacket;
+      if (target.id === localIdRef.current) {
+        setItemEffectSignal({ id, item });
+      } else {
+        sendRealtimePacket(effect, target.id);
+      }
     }
-    markPlayerInked(target.id, until);
-    broadcast({ type: "ink-state", playerId: target.id, until });
+    markPlayerItemEffect(target.id, item, until);
+    broadcast({ type: "item-state", playerId: target.id, item, until });
     const log: AttackLog = {
-      id: `ink-${id}-${fromId}-${target.id}`,
+      id: `${item}-${id}-${fromId}-${target.id}`,
       fromName: sender.name,
       toName: target.name,
       amount: 0,
-      kind: "ink",
+      kind: item,
     };
     appendAttackLog(log);
     broadcast({ type: "attack-log", log });
@@ -2129,7 +2510,7 @@ function OnlineParty({
       manualTargetsRef.current.set(senderId, packet.targetId);
     }
     if (packet.type === "item-use") {
-      routeInkItem(senderId, packet.targetId);
+      routeItem(senderId, packet.targetId, packet.item);
     }
     if (packet.type === "attack") {
       routeAttack(senderId, packet.amount);
@@ -2337,7 +2718,10 @@ function OnlineParty({
       setLocalEndReason("topout");
       setGarbageSignal({ id: 0, amount: 0 });
       setInkSignal({ id: 0 });
+      setItemEffectSignal(null);
       setInkedPlayers({});
+      setPlayerItemEffects({});
+      replaceItemInventory(startingItemInventory(packet.rules));
       beginCountdown(packet.startAt);
     }
     if (packet.type === "snapshot" && packet.playerId) {
@@ -2351,6 +2735,12 @@ function OnlineParty({
     }
     if (packet.type === "ink-state") {
       markPlayerInked(packet.playerId, packet.until);
+    }
+    if (packet.type === "item-effect") {
+      setItemEffectSignal({ id: packet.id, item: packet.item });
+    }
+    if (packet.type === "item-state") {
+      markPlayerItemEffect(packet.playerId, packet.item, packet.until);
     }
     if (packet.type === "attack-log") {
       appendAttackLog(packet.log);
@@ -2370,10 +2760,12 @@ function OnlineParty({
       setMatchEndedAt(0);
       setShowResultCard(false);
       setSelectedTargetId("");
-      setInkUsed(0);
+      replaceItemInventory([]);
       setAttackLogs([]);
       setInkSignal({ id: 0 });
+      setItemEffectSignal(null);
       setInkedPlayers({});
+      setPlayerItemEffects({});
       setPhase("lobby");
     }
     if (packet.type === "end") {
@@ -2757,7 +3149,10 @@ function OnlineParty({
     clearCountdown();
     clearResultReveal();
     setInkSignal({ id: 0 });
+    setItemEffectSignal(null);
     setInkedPlayers({});
+    setPlayerItemEffects({});
+    replaceItemInventory([]);
     if (roleRef.current !== "host") {
       setPhase("lobby");
       return;
@@ -2774,7 +3169,6 @@ function OnlineParty({
     manualTargetsRef.current.clear();
     itemUsesRef.current.clear();
     setSelectedTargetId("");
-    setInkUsed(0);
     setAttackLogs([]);
     setWinnerId("");
     setWinnerName("");
@@ -2822,10 +3216,12 @@ function OnlineParty({
     manualTargetsRef.current.clear();
     itemUsesRef.current.clear();
     setSelectedTargetId("");
-    setInkUsed(0);
+    replaceItemInventory(startingItemInventory(rulesRef.current));
     setAttackLogs([]);
     setInkSignal({ id: 0 });
+    setItemEffectSignal(null);
     setInkedPlayers({});
+    setPlayerItemEffects({});
     replacePlayers(next);
     setRoomError("");
     setWinnerId("");
@@ -2888,28 +3284,34 @@ function OnlineParty({
     }
   };
 
-  const activateInkItem = (targetId: string) => {
+  const collectItem = (item: ItemType) => {
+    const next = [...itemInventoryRef.current, item].slice(-8);
+    replaceItemInventory(next);
+  };
+
+  const activateItem = (targetId: string) => {
     const activeLocalPlayer = playersRef.current.find(
       (player) => player.id === localIdRef.current,
     );
+    const item = itemInventoryRef.current[0];
     if (
       !matchRules.itemsEnabled ||
-      inkUsed >= matchRules.inkLimit ||
+      !item ||
       !activeLocalPlayer?.alive
     ) {
       return;
     }
-    setInkUsed((current) => current + 1);
+    replaceItemInventory(itemInventoryRef.current.slice(1));
     if (roleRef.current === "host") {
-      routeInkItem(localIdRef.current, targetId);
+      routeItem(localIdRef.current, targetId, item);
     } else {
-      sendRealtimePacket({ type: "item-use", item: "ink", targetId });
+      sendRealtimePacket({ type: "item-use", item, targetId });
     }
   };
 
   useEffect(() => {
     shortcutSelectTargetRef.current = selectTarget;
-    shortcutInkRef.current = activateInkItem;
+    shortcutItemRef.current = activateItem;
   });
 
   const finishLocalPlayer = (
@@ -2994,9 +3396,11 @@ function OnlineParty({
     setConnectionStatus("");
     setAttackLogs([]);
     setSelectedTargetId("");
-    setInkUsed(0);
+    replaceItemInventory([]);
     setInkSignal({ id: 0 });
+    setItemEffectSignal(null);
     setInkedPlayers({});
+    setPlayerItemEffects({});
     manualTargetsRef.current.clear();
     itemUsesRef.current.clear();
     chatMessagesRef.current = [];
@@ -3035,7 +3439,8 @@ function OnlineParty({
   const isSpectating = Boolean(
     localPlayer && (!localPlayer.alive || localPlayer.spectating),
   );
-  const inkRemaining = Math.max(0, matchRules.inkLimit - inkUsed);
+  const currentItem = itemInventory[0] ?? null;
+  const itemRemaining = itemInventory.length;
   const survivors = players.filter(
     (player) => player.alive && player.connected,
   ).length;
@@ -3079,7 +3484,13 @@ function OnlineParty({
         }
         return;
       }
-      if (event.code !== "KeyI" || !matchRules.itemsEnabled) return;
+      if (
+        event.code !== "KeyI" ||
+        !matchRules.itemsEnabled ||
+        !itemInventoryRef.current.length
+      ) {
+        return;
+      }
       const opponent =
         remotePlayers.find(
           (player) =>
@@ -3093,7 +3504,7 @@ function OnlineParty({
       if (opponent.id !== selectedTargetId) {
         shortcutSelectTargetRef.current(opponent.id);
       }
-      shortcutInkRef.current(opponent.id);
+      shortcutItemRef.current(opponent.id);
     };
     window.addEventListener("keydown", handleShortcut);
     return () => window.removeEventListener("keydown", handleShortcut);
@@ -3263,7 +3674,11 @@ function OnlineParty({
               {matchRules.gravity}ms 낙하 · 공격 {matchRules.attack.toFixed(1)}× ·
               고스트 {matchRules.ghost ? "ON" : "OFF"} · 타깃{" "}
               {matchRules.targetMode.toUpperCase()} · 아이템{" "}
-              {matchRules.itemsEnabled ? `INK ×${matchRules.inkLimit}` : "OFF"}
+              {matchRules.itemsEnabled
+                ? `${matchRules.itemMode.toUpperCase()} · ${enabledItems(matchRules)
+                    .map((item) => ITEM_META[item].short)
+                    .join(" / ")}`
+                : "OFF"}
             </span>
           </p>
           <div className="attack-rules">
@@ -3318,17 +3733,56 @@ function OnlineParty({
         {attackLogs.map((log) => (
           <div key={log.id}>
             <strong>{log.fromName}</strong>
-            <span>{log.kind === "ink" ? "INK" : `${log.amount} GARBAGE`}</span>
+            <span>
+              {log.kind === "garbage"
+                ? `${log.amount} GARBAGE`
+                : ITEM_META[log.kind].short}
+            </span>
             <em>→ {log.toName}</em>
           </div>
         ))}
       </div>
+      {matchRules.itemsEnabled && !isSpectating && (
+        <div className="item-inventory" aria-label="보유 공격 아이템">
+          <span>
+            {matchRules.itemMode === "blocks"
+              ? "ITEM BLOCKS · 줄을 지워 획득"
+              : "ITEM STOCK"}
+          </span>
+          <div>
+            {itemInventory.length ? (
+              itemInventory.map((item, index) => (
+                <i
+                  className={`inventory-item item-${item} ${
+                    index === 0 ? "inventory-next" : ""
+                  }`}
+                  key={`${item}-${index}`}
+                  title={ITEM_META[item].label}
+                >
+                  {ITEM_META[item].icon}
+                </i>
+              ))
+            ) : (
+              <em>EMPTY</em>
+            )}
+          </div>
+          <small>
+            {currentItem
+              ? `NEXT · ${ITEM_META[currentItem].short} · 상대 선택 후 I`
+              : "아이템 블록이 든 줄을 지우세요"}
+          </small>
+        </div>
+      )}
       <div className="mobile-opponent-strip" aria-label="상대 생존 목록">
         {remotePlayers.map((player) => (
           <article
             className={`mobile-opponent-card ${
               player.id === selectedTargetId ? "strip-selected" : ""
-            } ${inkedPlayers[player.id] ? "card-inked" : ""}`}
+            } ${inkedPlayers[player.id] ? "card-inked" : ""} ${
+              playerItemEffects[player.id]
+                ? `card-effect-${playerItemEffects[player.id].item}`
+                : ""
+            }`}
             key={player.id}
           >
             <button
@@ -3347,23 +3801,25 @@ function OnlineParty({
                 {player.alive
                   ? inkedPlayers[player.id]
                     ? "INKED"
+                    : playerItemEffects[player.id]
+                      ? ITEM_META[playerItemEffects[player.id].item].short
                     : player.id === selectedTargetId
                       ? "TARGET"
                       : "LIVE"
                   : "OUT"}
               </em>
             </button>
-            {matchRules.itemsEnabled && !isSpectating && (
+            {matchRules.itemsEnabled && !isSpectating && currentItem && (
               <button
-                aria-label={`${player.name}에게 먹물 아이템 사용`}
-                className="mobile-ink-action"
+                aria-label={`${player.name}에게 ${ITEM_META[currentItem].label} 아이템 사용`}
+                className={`mobile-item-action item-use-${currentItem}`}
                 disabled={
-                  !player.alive || !player.connected || inkRemaining <= 0
+                  !player.alive || !player.connected || itemRemaining <= 0
                 }
-                onClick={() => activateInkItem(player.id)}
+                onClick={() => activateItem(player.id)}
               >
-                INK
-                <small>×{inkRemaining}</small>
+                {ITEM_META[currentItem].short}
+                <small>×{itemRemaining}</small>
               </button>
             )}
           </article>
@@ -3402,7 +3858,9 @@ function OnlineParty({
                   mobileControlLayout={mobileControlLayout}
                   garbage={garbageSignal}
                   ink={inkSignal}
+                  itemEffect={itemEffectSignal ?? undefined}
                   onAttack={sendAttack}
+                  onItemPickup={collectItem}
                   onFinish={finishLocalPlayer}
                   onSnapshot={shareSnapshot}
                 />
@@ -3431,7 +3889,9 @@ function OnlineParty({
             <em>
               {matchRules.targetMode.toUpperCase()} · 1–7 TARGET
               {matchRules.itemsEnabled
-                ? ` · I INK ×${inkRemaining}`
+                ? currentItem
+                  ? ` · I ${ITEM_META[currentItem].short} ×${itemRemaining}`
+                  : " · ITEM EMPTY"
                 : " · ITEMS OFF"}
             </em>
           </div>
@@ -3442,6 +3902,11 @@ function OnlineParty({
                 key={player.id}
                 hotkey={index + 1}
                 inked={Boolean(inkedPlayers[player.id])}
+                effect={
+                  playerItemEffects[player.id]?.item ??
+                  player.snapshot?.effect ??
+                  null
+                }
                 selected={player.id === selectedTargetId}
                 targeting={
                   !isSpectating &&
@@ -3450,14 +3915,16 @@ function OnlineParty({
                   player.alive &&
                   player.connected
                 }
-                inkRemaining={inkRemaining}
+                currentItem={currentItem}
+                itemRemaining={itemRemaining}
                 onSelect={() => selectTarget(player.id)}
-                onInk={
+                onItem={
                   !isSpectating &&
                   matchRules.itemsEnabled &&
+                  Boolean(currentItem) &&
                   player.alive &&
                   player.connected
-                    ? () => activateInkItem(player.id)
+                    ? () => activateItem(player.id)
                     : undefined
                 }
               />
@@ -3599,6 +4066,17 @@ function RulesPanel({
   onMobileControlLayoutChange: (layout: MobileControlLayout) => void;
   controlLayoutStorage: "account" | "device";
 }) {
+  const toggleItem = (item: ItemType) => {
+    const pool = enabledItems(rules);
+    if (pool.includes(item) && pool.length === 1) return;
+    setRules({
+      ...rules,
+      itemPool: pool.includes(item)
+        ? pool.filter((candidate) => candidate !== item)
+        : [...pool, item],
+    });
+  };
+
   return (
     <div
       className="rules-backdrop"
@@ -3737,32 +4215,85 @@ function RulesPanel({
               >
                 <span>
                   <strong>아이템전</strong>
-                  <small>상대 보드를 먹물로 4.2초 가립니다.</small>
+                  <small>획득한 공격 아이템을 선택한 상대에게 사용합니다.</small>
                 </span>
                 <span
                   className={`switch ${rules.itemsEnabled ? "switch-on" : ""}`}
                 />
               </button>
               {rules.itemsEnabled && (
-                <label>
-                  <span>
-                    <strong>먹물 개수</strong>
-                    <em>게임당 {rules.inkLimit}개</em>
-                  </span>
-                  <input
-                    type="range"
-                    min="1"
-                    max="5"
-                    step="1"
-                    value={rules.inkLimit}
-                    onChange={(event) =>
-                      setRules({
-                        ...rules,
-                        inkLimit: Number(event.target.value),
-                      })
-                    }
-                  />
-                </label>
+                <section className="rules-item-settings">
+                  <label>
+                    <span>
+                      <strong>아이템 획득 방식</strong>
+                      <em>{rules.itemMode.toUpperCase()}</em>
+                    </span>
+                    <select
+                      value={rules.itemMode}
+                      onChange={(event) =>
+                        setRules({
+                          ...rules,
+                          itemMode: event.target.value as Rules["itemMode"],
+                        })
+                      }
+                    >
+                      <option value="stock">STOCK — 시작할 때 지급</option>
+                      <option value="blocks">
+                        ITEM BLOCKS — 아이템 줄을 지워 획득
+                      </option>
+                    </select>
+                    <small>
+                      ITEM BLOCKS에서는 빛나는 아이템 블록이 든 줄을
+                      완성해 지워야 인벤토리에 들어옵니다.
+                    </small>
+                  </label>
+                  {rules.itemMode === "stock" && (
+                    <label>
+                      <span>
+                        <strong>시작 아이템 수</strong>
+                        <em>게임당 {rules.itemLimit}개</em>
+                      </span>
+                      <input
+                        type="range"
+                        min="1"
+                        max="7"
+                        step="1"
+                        value={rules.itemLimit}
+                        onChange={(event) =>
+                          setRules({
+                            ...rules,
+                            itemLimit: Number(event.target.value),
+                          })
+                        }
+                      />
+                    </label>
+                  )}
+                  <div className="item-pool-settings">
+                    <span>
+                      <strong>사용 아이템</strong>
+                      <em>{enabledItems(rules).length} / {ITEM_TYPES.length}</em>
+                    </span>
+                    <div>
+                      {ITEM_TYPES.map((item) => {
+                        const active = enabledItems(rules).includes(item);
+                        return (
+                          <button
+                            className={active ? "active" : ""}
+                            key={item}
+                            onClick={() => toggleItem(item)}
+                            aria-pressed={active}
+                            title={ITEM_META[item].description}
+                          >
+                            <i>{ITEM_META[item].icon}</i>
+                            <strong>{ITEM_META[item].short}</strong>
+                            <small>{ITEM_META[item].label}</small>
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <small>최소 한 종류는 항상 활성화됩니다.</small>
+                  </div>
+                </section>
               )}
             </>
           )}
