@@ -2101,12 +2101,63 @@ function OnlineParty({
     () => undefined,
   );
   const shortcutItemRef = useRef<(targetId: string) => void>(() => undefined);
+  const onlineArenaRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     onPlayingChange(
       phase === "playing" || phase === "countdown" || phase === "ended",
     );
   }, [onPlayingChange, phase]);
+
+  useEffect(() => {
+    if (phase !== "playing") return;
+    const arena = onlineArenaRef.current;
+    if (!arena) return;
+    const match = arena.closest(".online-match");
+    const mobileQuery = window.matchMedia("(max-width: 760px)");
+    let frame = 0;
+
+    const updateBoardSpace = () => {
+      window.cancelAnimationFrame(frame);
+      frame = window.requestAnimationFrame(() => {
+        if (!mobileQuery.matches) {
+          arena.style.removeProperty("--mobile-board-space");
+          return;
+        }
+        const controls = match?.querySelector<HTMLElement>(".mobile-controls");
+        if (!controls) return;
+        const arenaTop = arena.getBoundingClientRect().top;
+        const controlsTop = controls.getBoundingClientRect().top;
+        const available = Math.max(200, Math.floor(controlsTop - arenaTop - 12));
+        arena.style.setProperty("--mobile-board-space", `${available}px`);
+      });
+    };
+
+    const resizeObserver = new ResizeObserver(updateBoardSpace);
+    [
+      arena,
+      match?.querySelector<HTMLElement>(".mobile-controls"),
+      match?.querySelector<HTMLElement>(".online-match-bar"),
+      match?.querySelector<HTMLElement>(".item-inventory"),
+      match?.querySelector<HTMLElement>(".mobile-opponent-strip"),
+    ].forEach((element) => {
+      if (element) resizeObserver.observe(element);
+    });
+    const viewport = window.visualViewport;
+    viewport?.addEventListener("resize", updateBoardSpace);
+    viewport?.addEventListener("scroll", updateBoardSpace);
+    window.addEventListener("resize", updateBoardSpace);
+    updateBoardSpace();
+
+    return () => {
+      window.cancelAnimationFrame(frame);
+      resizeObserver.disconnect();
+      viewport?.removeEventListener("resize", updateBoardSpace);
+      viewport?.removeEventListener("scroll", updateBoardSpace);
+      window.removeEventListener("resize", updateBoardSpace);
+      arena.style.removeProperty("--mobile-board-space");
+    };
+  }, [phase]);
 
   useEffect(() => {
     if (
@@ -3959,7 +4010,7 @@ function OnlineParty({
           </article>
         ))}
       </div>
-      <div className="online-arena">
+      <div className="online-arena" ref={onlineArenaRef}>
         <div className="local-board-zone">
           {phase === "countdown" ? (
             <div className="countdown-stage" aria-live="assertive">

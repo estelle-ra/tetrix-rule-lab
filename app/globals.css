@@ -4130,14 +4130,17 @@ footer {
 
   .screen-multiplayer-playing .game-rig {
     --cell: clamp(
-      12px,
+      10px,
       min(
         calc((100vw - 150px) / 10),
         calc(
-          (
-              var(--visual-viewport-height) -
-                250px -
-                env(safe-area-inset-bottom)
+          var(
+              --mobile-board-space,
+              calc(
+                var(--visual-viewport-height) -
+                  310px -
+                  env(safe-area-inset-bottom)
+              )
             ) /
             20
         )
