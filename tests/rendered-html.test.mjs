@@ -252,6 +252,14 @@ test("ships without starter-only assets", async () => {
   assert.match(globalCss, /@keyframes line-callout/);
   assert.match(globalCss, /\.particle-shape-1/);
   assert.match(globalCss, /\.remote-player-identity/);
+  assert.match(
+    globalCss,
+    /\.remote-player-head kbd[\s\S]*box-sizing: border-box[\s\S]*padding: 0/,
+  );
+  assert.match(
+    globalCss,
+    /\.lobby-code-panel strong[\s\S]*clamp\(28px, 2\.5vw, 36px\)/,
+  );
   assert.match(gameClient, /const LOCK_DELAY_MS = 350/);
   assert.match(gameClient, /const MAX_LOCK_RESETS = 8/);
   assert.match(gameClient, /const MAX_GROUNDED_MS = 1800/);

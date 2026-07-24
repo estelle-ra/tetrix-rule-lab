@@ -1590,9 +1590,12 @@ button.online-choice:hover {
 }
 
 .lobby-code-panel strong {
-  font: 800 44px monospace;
-  letter-spacing: 0.12em;
+  font: 800 clamp(28px, 2.5vw, 36px) monospace;
+  letter-spacing: 0.08em;
   margin: 14px 0 24px;
+  max-width: 100%;
+  min-width: 0;
+  white-space: nowrap;
 }
 
 .lobby-code-panel button {
@@ -2020,14 +2023,19 @@ button.online-choice:hover {
 
 .remote-player-head kbd {
   background: var(--orange);
+  border: 0;
+  box-shadow: none;
+  box-sizing: border-box;
   color: #090a0c;
   display: inline-grid;
-  font: 900 9px/16px monospace;
-  height: 16px;
-  margin-right: 5px;
+  flex: 0 0 22px;
+  font: 900 11px/1 monospace;
+  height: 22px;
+  margin-right: 7px;
+  min-width: 22px;
+  padding: 0;
   place-items: center;
-  flex: 0 0 16px;
-  width: 16px;
+  width: 22px;
 }
 
 .target-hint {
