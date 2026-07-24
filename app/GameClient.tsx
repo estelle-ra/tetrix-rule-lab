@@ -3509,11 +3509,17 @@ function RulesPanel({
   setRules,
   onClose,
   multiplayer,
+  mobileControlLayout,
+  onMobileControlLayoutChange,
+  controlLayoutStorage,
 }: {
   rules: Rules;
   setRules: (rules: Rules) => void;
   onClose: () => void;
   multiplayer: boolean;
+  mobileControlLayout: MobileControlLayout;
+  onMobileControlLayoutChange: (layout: MobileControlLayout) => void;
+  controlLayoutStorage: "account" | "device";
 }) {
   return (
     <div
@@ -3585,6 +3591,42 @@ function RulesPanel({
             </span>
             <span className={`switch ${rules.ghost ? "switch-on" : ""}`} />
           </button>
+          <section className="rules-personal-control">
+            <div className="rules-personal-heading">
+              <span>
+                <strong>개인 모바일 조작</strong>
+                <small>게임 중에도 나에게만 즉시 적용됩니다.</small>
+              </span>
+              <em>PERSONAL</em>
+            </div>
+            <div className="rules-control-options">
+              <button
+                className={
+                  mobileControlLayout === "joystick" ? "active" : ""
+                }
+                onClick={() => onMobileControlLayoutChange("joystick")}
+                aria-pressed={mobileControlLayout === "joystick"}
+              >
+                <span>DEFAULT</span>
+                <strong>조이스틱</strong>
+                <small>끌어서 연속 이동</small>
+              </button>
+              <button
+                className={mobileControlLayout === "buttons" ? "active" : ""}
+                onClick={() => onMobileControlLayoutChange("buttons")}
+                aria-pressed={mobileControlLayout === "buttons"}
+              >
+                <span>BUTTONS</span>
+                <strong>← ↓ →</strong>
+                <small>고정 버튼으로 이동</small>
+              </button>
+            </div>
+            <p>
+              {controlLayoutStorage === "account"
+                ? "선택한 조작 방식은 로그인 계정에 저장됩니다."
+                : "게스트 설정은 이 기기에 저장됩니다."}
+            </p>
+          </section>
           {multiplayer && (
             <>
               <label>
@@ -3837,7 +3879,13 @@ export default function GameClient() {
             const parsed = JSON.parse(saved) as PlayerIdentity;
             const username = cleanPlayerName(parsed.username);
             if (username !== "PLAYER") {
-              setIdentity({ username: username.toUpperCase(), guest: true });
+              setIdentity({
+                username: username.toUpperCase(),
+                guest: true,
+                mobileControlLayout: cleanMobileControlLayout(
+                  parsed.mobileControlLayout,
+                ),
+              });
             }
           }
         } catch {
@@ -3890,6 +3938,29 @@ export default function GameClient() {
       window.localStorage.removeItem("tetstar-identity-v1");
     }
   };
+
+  const changeMobileControlLayout = useCallback(
+    (mobileControlLayout: MobileControlLayout) => {
+      if (!identity) return;
+      const nextIdentity = { ...identity, mobileControlLayout };
+      setIdentity(nextIdentity);
+      if (identity.guest) {
+        window.localStorage.setItem(
+          "tetstar-identity-v1",
+          JSON.stringify(nextIdentity),
+        );
+        return;
+      }
+      void supabase?.auth
+        .updateUser({ data: { mobile_control_layout: mobileControlLayout } })
+        .then(({ error }) => {
+          if (error) {
+            console.warn("MOBILE_CONTROL_SAVE_FAILED", error.code);
+          }
+        });
+    },
+    [identity],
+  );
 
   const signOutIdentity = () => {
     setIdentity(null);
@@ -4256,6 +4327,13 @@ export default function GameClient() {
           setRules={setRules}
           onClose={() => setRulesOpen(false)}
           multiplayer={screen === "versus"}
+          mobileControlLayout={
+            identity?.mobileControlLayout ?? "joystick"
+          }
+          onMobileControlLayoutChange={changeMobileControlLayout}
+          controlLayoutStorage={
+            identity && !identity.guest ? "account" : "device"
+          }
         />
       )}
 

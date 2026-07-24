@@ -2608,6 +2608,94 @@ input[type="range"] {
   transform: translateX(20px);
 }
 
+.rules-personal-control {
+  border-bottom: 1px solid #282c32;
+  border-top: 1px solid #282c32;
+  margin-top: 18px;
+  padding: 18px 0;
+}
+
+.rules-personal-heading {
+  align-items: start;
+  display: flex;
+  gap: 14px;
+  justify-content: space-between;
+}
+
+.rules-personal-heading strong,
+.rules-personal-heading small {
+  display: block;
+}
+
+.rules-personal-heading strong {
+  font-size: 15px;
+}
+
+.rules-personal-heading small {
+  color: #69717c;
+  font-size: 11px;
+  margin-top: 4px;
+}
+
+.rules-personal-heading em {
+  color: var(--lime);
+  font: normal 10px monospace;
+  letter-spacing: 0.1em;
+}
+
+.rules-control-options {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-top: 13px;
+}
+
+.rules-control-options button {
+  background: #11141a;
+  border: 1px solid #343a44;
+  color: #8f97a2;
+  cursor: pointer;
+  min-height: 76px;
+  padding: 11px 12px;
+  text-align: left;
+}
+
+.rules-control-options button.active {
+  background: rgba(67, 213, 232, 0.1);
+  border-color: var(--cyan);
+  box-shadow: inset 3px 0 0 var(--cyan);
+  color: var(--paper);
+}
+
+.rules-control-options span,
+.rules-control-options strong,
+.rules-control-options small {
+  display: block;
+}
+
+.rules-control-options span {
+  color: var(--orange);
+  font: 9px monospace;
+  letter-spacing: 0.1em;
+}
+
+.rules-control-options strong {
+  font-size: 15px;
+  margin-top: 4px;
+}
+
+.rules-control-options small {
+  color: #69717c;
+  font-size: 10px;
+  margin-top: 3px;
+}
+
+.rules-personal-control > p {
+  color: #59616b;
+  font: 10px/1.5 monospace;
+  margin: 10px 0 0;
+}
+
 .rules-body > p {
   color: #515861;
   font: 10px/1.7 monospace;

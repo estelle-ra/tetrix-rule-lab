@@ -177,6 +177,9 @@ test("ships without starter-only assets", async () => {
   assert.match(gameClient, /showResultCard/);
   assert.match(gameClient, /GARBAGE PRESSURE/);
   assert.match(gameClient, /matchOutcome/);
+  assert.match(gameClient, /개인 모바일 조작/);
+  assert.match(gameClient, /changeMobileControlLayout/);
+  assert.match(gameClient, /controlLayoutStorage/);
   assert.match(gameClient, /MATCH COMPLETE/);
   assert.match(gameClient, /HORIZONTAL_DAS_MS = 140/);
   assert.match(gameClient, /HORIZONTAL_ARR_MS = 54/);
@@ -193,6 +196,8 @@ test("ships without starter-only assets", async () => {
   assert.match(globalCss, /\.winner-reveal/);
   assert.match(globalCss, /\.touch-direction/);
   assert.match(globalCss, /\.control-layout-options/);
+  assert.match(globalCss, /\.rules-personal-control/);
+  assert.match(globalCss, /\.rules-control-options/);
   assert.match(globalCss, /\.touch-step/);
   assert.match(globalCss, /var\(--visual-viewport-height\)/);
   assert.doesNotMatch(gameClient, /online-mode-label/);
