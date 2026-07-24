@@ -1660,7 +1660,7 @@ function OnlineParty({
     "entry" | "connecting" | "lobby" | "countdown" | "playing" | "ended"
   >("entry");
   const [role, setRole] = useState<"host" | "guest" | null>(null);
-  const [playerName, setPlayerName] = useState(defaultPlayerName);
+  const playerName = defaultPlayerName;
   const [joinCode, setJoinCode] = useState(initialRoomCode);
   const [roomCode, setRoomCode] = useState("");
   const [hostId, setHostId] = useState("");
@@ -1713,10 +1713,6 @@ function OnlineParty({
     () => undefined,
   );
   const shortcutInkRef = useRef<(targetId: string) => void>(() => undefined);
-
-  useEffect(() => {
-    if (phaseRef.current === "entry") setPlayerName(defaultPlayerName);
-  }, [defaultPlayerName]);
 
   useEffect(() => {
     onPlayingChange(
@@ -3149,22 +3145,18 @@ function OnlineParty({
     return (
       <section className="online-entry">
         <div className="online-entry-head">
-          <span className="eyebrow">MULTIPLAYER / UP TO 8</span>
+          <div className="online-entry-meta">
+            <span className="eyebrow">MULTIPLAYER / UP TO 8</span>
+            <span className="online-player-tag">
+              PLAYING AS <strong>{cleanPlayerName(defaultPlayerName)}</strong>
+            </span>
+          </div>
           <h2>각자의 기기에서 접속하세요.</h2>
           <p>
             한 명이 방을 만들고, 나머지 참가자는 6자리 코드로 접속합니다.
             게임 데이터는 Supabase 실시간 채널로 전달됩니다.
           </p>
         </div>
-        <label className="online-name-field">
-          <span>PLAYER NAME</span>
-          <input
-            value={playerName}
-            maxLength={16}
-            onChange={(event) => setPlayerName(event.target.value)}
-            disabled={phase === "connecting"}
-          />
-        </label>
         <div className="online-entry-grid">
           <button
             className="online-choice online-choice-host"
