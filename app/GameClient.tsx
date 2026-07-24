@@ -3500,7 +3500,7 @@ function OnlineParty({
                 <strong>RESULTS</strong>
               </span>
               <span className="result-survivor">
-                <small>NO. 1 · SURVIVOR</small>
+                <small>NO. 1 · WINNER</small>
                 <strong>{winnerName}</strong>
               </span>
             </div>
@@ -3528,7 +3528,19 @@ function OnlineParty({
                   </span>
                   <em className="result-survival">
                     {index === 0
-                      ? "SURVIVOR"
+                      ? (
+                          <>
+                            <strong>WINNER</strong>
+                            <small>
+                              {formatResultTime(
+                                Math.max(
+                                  0,
+                                  matchEndedAt - matchStartedAt,
+                                ),
+                              )}
+                            </small>
+                          </>
+                        )
                       : formatResultTime(
                           Math.max(
                             0,
@@ -3946,6 +3958,17 @@ export default function GameClient() {
             const parsed = JSON.parse(saved) as PlayerIdentity;
             const username = cleanPlayerName(parsed.username);
             if (username !== "PLAYER") {
+              if (supabase) {
+                const { data: available } = await supabase.rpc(
+                  "is_username_available",
+                  { candidate: username },
+                );
+                if (available === false) {
+                  window.localStorage.removeItem("tetstar-identity-v1");
+                  setIdentityOpen(true);
+                  return;
+                }
+              }
               setIdentity({
                 username: username.toUpperCase(),
                 guest: true,

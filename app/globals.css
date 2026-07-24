@@ -2247,9 +2247,23 @@ button.online-choice:hover {
 
 .result-survival {
   color: #cbb8da;
+  display: flex;
+  flex-direction: column;
   font: 800 20px monospace;
   letter-spacing: -0.045em;
   text-align: right;
+}
+
+.result-survival strong,
+.result-survival small {
+  display: block;
+}
+
+.result-survival small {
+  color: #9d8dab;
+  font: 700 12px monospace;
+  letter-spacing: -0.035em;
+  margin-top: 3px;
 }
 
 .result-actions {
@@ -2437,6 +2451,10 @@ button.online-choice:hover {
 
 .result-list > .result-winner .result-survival {
   color: var(--lime);
+}
+
+.result-list > .result-winner .result-survival small {
+  color: #dbe8a8;
 }
 
 .result-list > .result-self {

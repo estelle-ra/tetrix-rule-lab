@@ -181,6 +181,12 @@ test("ships without starter-only assets", async () => {
   assert.match(gameClient, /formatResultTime/);
   assert.match(gameClient, /aria-label="최종 순위"/);
   assert.match(gameClient, />RESULTS</);
+  assert.match(gameClient, /NO\. 1 · WINNER/);
+  assert.match(gameClient, /matchEndedAt - matchStartedAt/);
+  assert.match(
+    gameClient,
+    /available === false[\s\S]*removeItem\("tetstar-identity-v1"\)/,
+  );
   assert.match(gameClient, /className="winner-reveal"/);
   assert.match(gameClient, /showResultCard/);
   assert.match(gameClient, /GARBAGE PRESSURE/);
@@ -260,6 +266,10 @@ test("ships without starter-only assets", async () => {
   assert.match(authGate, /SEND RESET LINK/);
   assert.match(authGate, /ProfileDashboard/);
   assert.match(authGate, /mobile_control_layout/);
+  assert.match(
+    authGate,
+    /가입한 회원이 사용 중인 username입니다\. 다른 이름을 선택해주세요\./,
+  );
   assert.match(profileDashboard, /모드별 최고 기록/);
   assert.match(profileDashboard, /send_friend_request/);
   assert.match(profileDashboard, /className="profile-refresh"/);

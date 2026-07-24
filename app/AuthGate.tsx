@@ -215,16 +215,32 @@ export default function AuthGate({
       );
     });
 
-  const saveGuest = () => {
-    if (normalizedUsername.length < 2) {
-      setError("username은 2–16자로 입력해주세요.");
-      return;
-    }
-    onIdentity({
-      username: accountUsername(normalizedUsername),
-      guest: true,
+  const saveGuest = () =>
+    run(async () => {
+      if (normalizedUsername.length < 2) {
+        throw new Error("username은 2–16자로 입력해주세요.");
+      }
+      if (supabase) {
+        const { data: available, error: availabilityError } =
+          await supabase.rpc("is_username_available", {
+            candidate: normalizedUsername,
+          });
+        if (availabilityError) {
+          throw new Error(
+            "username 중복 확인에 실패했습니다. 잠시 후 다시 시도해주세요.",
+          );
+        }
+        if (!available) {
+          throw new Error(
+            "가입한 회원이 사용 중인 username입니다. 다른 이름을 선택해주세요.",
+          );
+        }
+      }
+      onIdentity({
+        username: accountUsername(normalizedUsername),
+        guest: true,
+      });
     });
-  };
 
   const updatePassword = () =>
     run(async () => {
@@ -254,7 +270,7 @@ export default function AuthGate({
     if (view === "login") void login();
     if (view === "signup") void signup();
     if (view === "forgot") void resetRequest();
-    if (view === "guest") saveGuest();
+    if (view === "guest") void saveGuest();
     if (view === "update") void updatePassword();
   };
 
