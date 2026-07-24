@@ -3524,6 +3524,13 @@ function OnlineParty({
   const currentItem = itemInventory[0] ?? null;
   const itemRemaining = currentItem ? inventoryCounts[currentItem] : 0;
   const itemTotal = itemInventory.length;
+  const selectedItemTarget =
+    remotePlayers.find(
+      (player) =>
+        player.id === selectedTargetId &&
+        player.alive &&
+        player.connected,
+    ) ?? null;
   const survivors = players.filter(
     (player) => player.alive && player.connected,
   ).length;
@@ -3883,6 +3890,32 @@ function OnlineParty({
               ? `SELECTED · ${ITEM_META[currentItem].short} ×${itemRemaining} · 클릭/Q 선택 · I 사용`
               : "아이템 블록이 든 줄을 지우세요"}
           </small>
+          <button
+            type="button"
+            className={`mobile-inventory-fire ${
+              currentItem ? `item-use-${currentItem}` : ""
+            }`}
+            disabled={!currentItem || !selectedItemTarget}
+            onClick={() => {
+              if (selectedItemTarget) activateItem(selectedItemTarget.id);
+            }}
+            aria-label={
+              currentItem && selectedItemTarget
+                ? `${selectedItemTarget.name}에게 ${ITEM_META[currentItem].label} 아이템 사용`
+                : "공격 아이템과 대상을 선택하세요"
+            }
+          >
+            <span>
+              {currentItem
+                ? `${ITEM_META[currentItem].short} ×${itemRemaining}`
+                : "ITEM EMPTY"}
+            </span>
+            <strong>
+              {selectedItemTarget
+                ? `ATTACK → ${selectedItemTarget.name}`
+                : "SELECT TARGET"}
+            </strong>
+          </button>
         </div>
       )}
       <div className="mobile-opponent-strip" aria-label="상대 생존 목록">
@@ -3898,12 +3931,14 @@ function OnlineParty({
             key={player.id}
           >
             <button
-              aria-label={`${player.name} 수동 타깃 선택`}
+              aria-label={`${player.name} 공격 대상 선택`}
               className="mobile-target-select"
               disabled={
+                isSpectating ||
                 !player.alive ||
                 !player.connected ||
-                matchRules.targetMode !== "manual"
+                (!matchRules.itemsEnabled &&
+                  matchRules.targetMode !== "manual")
               }
               onClick={() => selectTarget(player.id)}
             >
@@ -3911,29 +3946,16 @@ function OnlineParty({
               <span>{player.name}</span>
               <em>
                 {player.alive
-                  ? inkedPlayers[player.id]
-                    ? "INKED"
-                    : playerItemEffects[player.id]
-                      ? ITEM_META[playerItemEffects[player.id].item].short
-                    : player.id === selectedTargetId
-                      ? "TARGET"
-                      : "LIVE"
+                  ? player.id === selectedTargetId
+                    ? "TARGET"
+                    : inkedPlayers[player.id]
+                      ? "INKED"
+                      : playerItemEffects[player.id]
+                        ? ITEM_META[playerItemEffects[player.id].item].short
+                        : "LIVE"
                   : "OUT"}
               </em>
             </button>
-            {matchRules.itemsEnabled && !isSpectating && currentItem && (
-              <button
-                aria-label={`${player.name}에게 ${ITEM_META[currentItem].label} 아이템 사용`}
-                className={`mobile-item-action item-use-${currentItem}`}
-                disabled={
-                  !player.alive || !player.connected || itemRemaining <= 0
-                }
-                onClick={() => activateItem(player.id)}
-              >
-                {ITEM_META[currentItem].short}
-                <small>×{itemRemaining}</small>
-              </button>
-            )}
           </article>
         ))}
       </div>

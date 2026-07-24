@@ -187,7 +187,13 @@ test("ships without starter-only assets", async () => {
   assert.match(gameClient, /joiningAsSpectator/);
   assert.match(gameClient, /다음 경기부터 참가합니다/);
   assert.match(gameClient, /screen-multiplayer-playing/);
-  assert.match(gameClient, /mobile-item-action/);
+  assert.match(gameClient, /mobile-inventory-fire/);
+  assert.doesNotMatch(gameClient, /mobile-item-action/);
+  assert.match(gameClient, /selectedItemTarget/);
+  assert.match(
+    gameClient,
+    /\(!matchRules\.itemsEnabled &&\s*matchRules\.targetMode !== "manual"\)/,
+  );
   assert.match(gameClient, /selectInventoryItem/);
   assert.match(gameClient, /event\.code === "KeyQ"/);
   assert.match(gameClient, /aria-pressed=\{currentItem === item\}/);
@@ -263,7 +269,8 @@ test("ships without starter-only assets", async () => {
   assert.match(globalCss, /\.item-inventory/);
   assert.match(globalCss, /\.item-cell/);
   assert.match(globalCss, /\.board-item-status/);
-  assert.match(globalCss, /\.mobile-item-action/);
+  assert.match(globalCss, /\.mobile-inventory-fire/);
+  assert.doesNotMatch(globalCss, /\.mobile-item-action/);
   assert.match(globalCss, /\.piece-W/);
   assert.match(globalCss, /\.touch-step/);
   assert.match(globalCss, /var\(--visual-viewport-height\)/);

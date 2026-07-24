@@ -2251,6 +2251,10 @@ button.online-choice:hover {
 .inventory-item.item-spin i { color: #91e9f5; }
 .inventory-item.item-star i { color: #ffe36b; }
 
+.mobile-inventory-fire {
+  display: none;
+}
+
 @keyframes attack-feed-in {
   0% { opacity: 0; transform: translateX(20px); }
   8%, 78% { opacity: 1; transform: translateX(0); }
@@ -4167,10 +4171,9 @@ footer {
   .mobile-opponent-card {
     background: #11151a;
     border: 1px solid #303741;
-    display: grid;
+    display: block;
     flex: 0 0 auto;
-    grid-template-columns: minmax(82px, 1fr) auto;
-    max-width: 172px;
+    max-width: 150px;
     min-height: 40px;
     min-width: 112px;
   }
@@ -4188,36 +4191,12 @@ footer {
     min-width: 0;
     padding: 4px 7px;
     text-align: left;
+    width: 100%;
   }
 
   .mobile-target-select:disabled {
     cursor: default;
     opacity: 1;
-  }
-
-  .mobile-item-action {
-    align-items: center;
-    background: #24131a;
-    border: 0;
-    border-left: 1px solid #563342;
-    color: #ff9bbd;
-    display: flex;
-    flex-direction: column;
-    font: 800 9px/1 monospace;
-    justify-content: center;
-    min-height: 38px;
-    min-width: 46px;
-    padding: 4px 5px;
-  }
-
-  .mobile-item-action small {
-    color: #fff;
-    font-size: 8px;
-    margin-top: 4px;
-  }
-
-  .mobile-item-action:disabled {
-    opacity: 0.32;
   }
 
   .mobile-opponent-card.card-effect-speed {
@@ -4249,6 +4228,38 @@ footer {
 
   .item-inventory > small {
     display: none;
+  }
+
+  .mobile-inventory-fire {
+    align-items: center;
+    background: #11151a;
+    border: 1px solid #3c4652;
+    display: grid;
+    flex: 0 0 auto;
+    gap: 2px;
+    min-height: 34px;
+    min-width: 98px;
+    padding: 4px 7px;
+    text-align: left;
+  }
+
+  .mobile-inventory-fire span {
+    color: var(--orange);
+    font: 800 8px/1 monospace;
+  }
+
+  .mobile-inventory-fire strong {
+    color: var(--paper);
+    font: 800 8px/1.1 Pretendard, sans-serif;
+    max-width: 110px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .mobile-inventory-fire:disabled {
+    border-color: #303640;
+    opacity: 0.42;
   }
 
   .inventory-item {
@@ -4299,10 +4310,6 @@ footer {
     font: normal 8px monospace;
   }
 
-  .mobile-opponent-card.strip-selected {
-    border-color: var(--orange);
-  }
-
   .mobile-opponent-card.card-inked {
     background: #24131a;
     border-color: #ff78a7;
@@ -4310,6 +4317,11 @@ footer {
 
   .mobile-opponent-card.card-inked em {
     color: #ff8eb5;
+  }
+
+  .mobile-opponent-card.strip-selected {
+    border-color: var(--orange);
+    box-shadow: 0 0 0 1px rgba(255, 111, 57, 0.34);
   }
 
   .screen-multiplayer-playing .opponents-zone {
