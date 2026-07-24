@@ -2,7 +2,7 @@ import type { NextConfig } from "next";
 
 const isGitHubPages = process.env.GITHUB_PAGES === "true";
 const repositoryName =
-  process.env.GITHUB_REPOSITORY?.split("/")[1] ?? "tetstar-rule-lab";
+  process.env.GITHUB_REPOSITORY?.split("/")[1] ?? "tetstar";
 const basePath = isGitHubPages ? `/${repositoryName}` : "";
 
 const nextConfig: NextConfig = isGitHubPages

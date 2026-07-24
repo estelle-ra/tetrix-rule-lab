@@ -121,7 +121,7 @@ test("ships without starter-only assets", async () => {
       readFile(new URL("../app/icon.svg", import.meta.url), "utf8"),
     ]);
 
-  assert.match(packageJson, /"name": "tetstar-rule-lab"/);
+  assert.match(packageJson, /"name": "tetstar"/);
   assert.match(packageJson, /"peerjs":/);
   assert.doesNotMatch(packageJson, /react-loading-skeleton/);
   assert.match(gameClient, /playersRef\.current\.length >= 8/);

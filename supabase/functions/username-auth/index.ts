@@ -49,13 +49,13 @@ function isRateLimited(request: Request, username: string) {
 
 function safeRedirect(value: unknown) {
   const fallback =
-    "https://estelle-ra.github.io/tetstar-rule-lab/?recovery=1";
+    "https://estelle-ra.github.io/tetstar/?recovery=1";
   try {
     const parsed = new URL(String(value ?? fallback));
     if (!allowedOrigins.has(parsed.origin)) return fallback;
     if (
       parsed.origin === "https://estelle-ra.github.io" &&
-      !parsed.pathname.startsWith("/tetstar-rule-lab/")
+      !parsed.pathname.startsWith("/tetstar/")
     ) {
       return fallback;
     }

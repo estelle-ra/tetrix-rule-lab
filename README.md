@@ -50,8 +50,8 @@ GitHub Pages용 정적 빌드는 다음과 같이 확인할 수 있습니다.
 
 ```bash
 GITHUB_PAGES=true \
-GITHUB_REPOSITORY=estelle-ra/tetstar-rule-lab \
-NEXT_PUBLIC_SITE_URL=https://estelle-ra.github.io/tetstar-rule-lab/ \
+GITHUB_REPOSITORY=estelle-ra/tetstar \
+NEXT_PUBLIC_SITE_URL=https://estelle-ra.github.io/tetstar/ \
 npm run build:pages
 ```
 
