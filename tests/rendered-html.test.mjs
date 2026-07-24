@@ -169,6 +169,16 @@ test("ships without starter-only assets", async () => {
   assert.match(gameClient, /Numpad/);
   assert.match(gameClient, /event\.code !== "KeyI"/);
   assert.match(gameClient, /repeatHandles\.current\.get\(token\) !== handle/);
+  assert.match(
+    gameClient,
+    /if \(repeat\) \{\s*event\.currentTarget\.setPointerCapture/,
+  );
+  assert.match(
+    gameClient,
+    /const startJoystick[\s\S]*stopAllRepeats\(\);[\s\S]*joystickDirection\.current = null/,
+  );
+  assert.match(gameClient, /className="remote-player-hotkey"/);
+  assert.doesNotMatch(gameClient, /P\{player\.slot \+ 1\}/);
   assert.match(gameClient, /type: "ink-state"/);
   assert.match(gameClient, /remote-ink-overlay/);
   assert.match(gameClient, /focusChatWithEnter/);
@@ -254,7 +264,7 @@ test("ships without starter-only assets", async () => {
   assert.match(globalCss, /\.remote-player-identity/);
   assert.match(
     globalCss,
-    /\.remote-player-head kbd[\s\S]*box-sizing: border-box[\s\S]*padding: 0/,
+    /\.remote-player-hotkey[\s\S]*align-items: center[\s\S]*padding: 0/,
   );
   assert.match(
     globalCss,

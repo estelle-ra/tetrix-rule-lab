@@ -2021,20 +2021,23 @@ button.online-choice:hover {
   white-space: nowrap;
 }
 
-.remote-player-head kbd {
+.remote-player-hotkey {
+  align-items: center;
   background: var(--orange);
   border: 0;
   box-shadow: none;
   box-sizing: border-box;
   color: #090a0c;
-  display: inline-grid;
+  display: inline-flex;
   flex: 0 0 22px;
-  font: 900 11px/1 monospace;
+  font: 900 12px/22px Pretendard, sans-serif;
   height: 22px;
+  justify-content: center;
   margin-right: 7px;
   min-width: 22px;
+  overflow: visible;
   padding: 0;
-  place-items: center;
+  text-align: center;
   width: 22px;
 }
 

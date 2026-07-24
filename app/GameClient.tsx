@@ -997,9 +997,9 @@ function GameBoard({
     repeat = false,
   ) => {
     event.preventDefault();
-    event.currentTarget.setPointerCapture(event.pointerId);
     const token = `touch:${event.pointerId}`;
     if (repeat) {
+      event.currentTarget.setPointerCapture(event.pointerId);
       startRepeat(
         token,
         action,
@@ -1051,6 +1051,8 @@ function GameBoard({
 
   const startJoystick = (event: ReactPointerEvent<HTMLDivElement>) => {
     event.preventDefault();
+    stopAllRepeats();
+    joystickDirection.current = null;
     const rect = event.currentTarget.getBoundingClientRect();
     const margin = 58;
     const origin = {
@@ -1576,10 +1578,15 @@ function RemoteBoard({
     >
       <div className="remote-player-head">
         <span className="remote-player-identity">
-          {hotkey && <kbd aria-label={`선수 ${hotkey}번 단축키`}>{hotkey}</kbd>}
-          <span className="remote-player-name">
-            P{player.slot + 1} {player.name}
-          </span>
+          {hotkey && (
+            <span
+              className="remote-player-hotkey"
+              aria-label={`선수 ${hotkey}번 단축키`}
+            >
+              {hotkey}
+            </span>
+          )}
+          <span className="remote-player-name">{player.name}</span>
         </span>
         <em>
           {player.alive
