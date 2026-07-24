@@ -253,6 +253,18 @@ test("ships without starter-only assets", async () => {
   assert.match(gameClient, /JOYSTICK_DEADZONE = 22/);
   assert.match(gameClient, /REALTIME READY/);
   assert.match(gameClient, /SUPABASE REALTIME/);
+  assert.match(gameClient, /REALTIME_SNAPSHOT_UPLINK_MS = 400/);
+  assert.match(gameClient, /REALTIME_SNAPSHOT_BATCH_MS = 600/);
+  assert.match(gameClient, /tetstar-snapshot-\$\{code\.toLowerCase\(\)\}/);
+  assert.match(gameClient, /broadcast: \{ ack: false \}/);
+  assert.match(gameClient, /queueRealtimeSnapshot/);
+  assert.match(gameClient, /sendRealtimePacket\(\{ type: "snapshots", snapshots \}\)/);
+  assert.match(gameClient, /onSnapshotRef\.current = onSnapshot/);
+  assert.match(gameClient, /snapshotIntervalMs - \(now - snapshotSentAt\.current\)/);
+  assert.doesNotMatch(
+    gameClient,
+    /sendRealtimePacket\(\{ type: "snapshot", snapshot \}\)/,
+  );
   assert.match(globalCss, /calc\(\(100dvh - 330px\) \/ 20\)/);
   assert.match(globalCss, /env\(safe-area-inset-bottom\)/);
   assert.match(globalCss, /\.mobile-opponent-strip/);

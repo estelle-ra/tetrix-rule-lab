@@ -167,6 +167,10 @@ type RoomPacket =
   | { type: "lobby"; players: RoomPlayer[]; rules: Rules }
   | { type: "host-transfer"; hostId: string; players: RoomPlayer[] }
   | { type: "snapshot"; playerId?: string; snapshot: GameSnapshot }
+  | {
+      type: "snapshots";
+      snapshots: Array<{ playerId: string; snapshot: GameSnapshot }>;
+    }
   | { type: "finish"; status: "lost"; reason?: FinishReason }
   | {
       type: "end";
@@ -184,6 +188,11 @@ type RealtimeEnvelope = {
   packet: RoomPacket;
 };
 
+type RealtimeSnapshotEnvelope = {
+  playerId: string;
+  snapshot: GameSnapshot;
+};
+
 const WIDTH = 10;
 const HEIGHT = 20;
 const LOCK_DELAY_MS = 350;
@@ -198,6 +207,9 @@ const INK_EFFECT_MS = 4200;
 const SPEED_EFFECT_MS = 7000;
 const SPIN_EFFECT_MS = 5000;
 const MAX_ITEM_INVENTORY = 30;
+// Eight players peak near 48 Realtime messages/s, leaving room for attacks and chat.
+const REALTIME_SNAPSHOT_UPLINK_MS = 400;
+const REALTIME_SNAPSHOT_BATCH_MS = 600;
 const PIECES: PieceName[] = ["I", "J", "L", "O", "S", "T", "Z"];
 const ITEM_TYPES: ItemType[] = ["ink", "speed", "odd", "spin", "star"];
 const ITEM_META: Record<
@@ -571,6 +583,7 @@ type BoardProps = {
   onItemPickup?: (item: ItemType) => void;
   onFinish?: (status: "won" | "lost", reason?: FinishReason) => void;
   onSnapshot?: (snapshot: GameSnapshot) => void;
+  snapshotIntervalMs?: number;
   onResult?: (result: GameResult) => void | Promise<void>;
 };
 
@@ -590,6 +603,7 @@ function GameBoard({
   onItemPickup,
   onFinish,
   onSnapshot,
+  snapshotIntervalMs = 180,
   onResult,
 }: BoardProps) {
   const pieceRandom = useMemo(
@@ -641,6 +655,7 @@ function GameBoard({
   const resultSent = useRef(false);
   const startedAt = useRef(0);
   const snapshotSentAt = useRef(0);
+  const onSnapshotRef = useRef(onSnapshot);
   const repeatHandles = useRef(new Map<string, RepeatHandle>());
   const inputBlockedUntilRef = useRef(0);
   const actionRef = useRef<(action: GameAction) => void>(() => undefined);
@@ -1418,12 +1433,20 @@ function GameBoard({
   }, [active, board, rules.ghost, status]);
 
   useEffect(() => {
-    if (!onSnapshot) return;
+    onSnapshotRef.current = onSnapshot;
+  }, [onSnapshot]);
+
+  useEffect(() => {
+    const snapshotCallback = onSnapshotRef.current;
+    if (!snapshotCallback) return;
     const now = Date.now();
-    const delay = Math.max(0, 180 - (now - snapshotSentAt.current));
+    const delay = Math.max(
+      0,
+      snapshotIntervalMs - (now - snapshotSentAt.current),
+    );
     const timer = window.setTimeout(() => {
       snapshotSentAt.current = Date.now();
-      onSnapshot({
+      snapshotCallback({
         cells: rendered.flat(),
         lines,
         score,
@@ -1439,9 +1462,9 @@ function GameBoard({
   }, [
     itemRenderMap,
     lines,
-    onSnapshot,
     rendered,
     score,
+    snapshotIntervalMs,
     speedActive,
     spinLocked,
     status,
@@ -2077,7 +2100,17 @@ function OnlineParty({
   const [connectionStatus, setConnectionStatus] = useState("");
   const peerRef = useRef<PeerInstance | null>(null);
   const realtimeChannelRef = useRef<RealtimeChannel | null>(null);
+  const realtimeSnapshotUplinkRef = useRef<RealtimeChannel | null>(null);
+  const realtimeSnapshotUplinkReadyRef = useRef(false);
+  const realtimeSnapshotChannelsRef = useRef<Map<string, RealtimeChannel>>(
+    new Map(),
+  );
+  const realtimeSnapshotBatchRef = useRef<
+    Map<string, GameSnapshot>
+  >(new Map());
+  const realtimeSnapshotBatchTimerRef = useRef<number | null>(null);
   const realtimeHostIdRef = useRef("");
+  const roomCodeRef = useRef("");
   const hostConnectionRef = useRef<DataConnection | null>(null);
   const connectionsRef = useRef<Map<string, DataConnection>>(new Map());
   const playersRef = useRef<RoomPlayer[]>([]);
@@ -2316,6 +2349,138 @@ function OnlineParty({
       event: "room",
       payload: { senderId, targetId, exceptId, packet },
     });
+  };
+
+  const realtimeSnapshotTopic = (code: string, playerId: string) =>
+    `tetstar-snapshot-${code.toLowerCase()}-${playerId}`;
+
+  const removeRealtimeSnapshotUplink = () => {
+    const channel = realtimeSnapshotUplinkRef.current;
+    realtimeSnapshotUplinkRef.current = null;
+    realtimeSnapshotUplinkReadyRef.current = false;
+    if (channel && supabase) void supabase.removeChannel(channel);
+  };
+
+  const removeRealtimeSnapshotHostChannel = (playerId: string) => {
+    const channel = realtimeSnapshotChannelsRef.current.get(playerId);
+    realtimeSnapshotChannelsRef.current.delete(playerId);
+    realtimeSnapshotBatchRef.current.delete(playerId);
+    if (channel && supabase) void supabase.removeChannel(channel);
+  };
+
+  const removeRealtimeSnapshotTransport = () => {
+    removeRealtimeSnapshotUplink();
+    realtimeSnapshotChannelsRef.current.forEach((channel) => {
+      if (supabase) void supabase.removeChannel(channel);
+    });
+    realtimeSnapshotChannelsRef.current.clear();
+    realtimeSnapshotBatchRef.current.clear();
+    if (realtimeSnapshotBatchTimerRef.current !== null) {
+      window.clearTimeout(realtimeSnapshotBatchTimerRef.current);
+      realtimeSnapshotBatchTimerRef.current = null;
+    }
+  };
+
+  const flushRealtimeSnapshots = () => {
+    realtimeSnapshotBatchTimerRef.current = null;
+    if (roleRef.current !== "host") {
+      realtimeSnapshotBatchRef.current.clear();
+      return;
+    }
+    const snapshots = Array.from(
+      realtimeSnapshotBatchRef.current,
+      ([playerId, snapshot]) => ({ playerId, snapshot }),
+    );
+    realtimeSnapshotBatchRef.current.clear();
+    if (!snapshots.length) return;
+    setPlayers([...playersRef.current]);
+    sendRealtimePacket({ type: "snapshots", snapshots });
+  };
+
+  const queueRealtimeSnapshot = (
+    playerId: string,
+    snapshot: GameSnapshot,
+  ) => {
+    if (roleRef.current !== "host") return;
+    playersRef.current = playersRef.current.map((player) =>
+      player.id === playerId ? { ...player, snapshot } : player,
+    );
+    realtimeSnapshotBatchRef.current.set(playerId, snapshot);
+    if (realtimeSnapshotBatchTimerRef.current !== null) return;
+    realtimeSnapshotBatchTimerRef.current = window.setTimeout(
+      flushRealtimeSnapshots,
+      REALTIME_SNAPSHOT_BATCH_MS,
+    );
+  };
+
+  const ensureRealtimeSnapshotUplink = (
+    code: string,
+    playerId: string,
+  ) => {
+    if (
+      !supabase ||
+      !code ||
+      !playerId ||
+      roleRef.current !== "guest" ||
+      realtimeSnapshotUplinkRef.current
+    ) {
+      return;
+    }
+    const channel = supabase.channel(
+      realtimeSnapshotTopic(code, playerId),
+      { config: { broadcast: { ack: false } } },
+    );
+    realtimeSnapshotUplinkRef.current = channel;
+    channel.subscribe((status) => {
+      if (realtimeSnapshotUplinkRef.current !== channel) return;
+      realtimeSnapshotUplinkReadyRef.current = status === "SUBSCRIBED";
+    });
+  };
+
+  const ensureRealtimeSnapshotHostChannel = (playerId: string) => {
+    if (
+      !supabase ||
+      !roomCodeRef.current ||
+      !playerId ||
+      playerId === localIdRef.current ||
+      realtimeSnapshotChannelsRef.current.has(playerId)
+    ) {
+      return;
+    }
+    const channel = supabase.channel(
+      realtimeSnapshotTopic(roomCodeRef.current, playerId),
+      { config: { broadcast: { ack: false } } },
+    );
+    realtimeSnapshotChannelsRef.current.set(playerId, channel);
+    channel
+      .on("broadcast", { event: "snapshot" }, (message) => {
+        const envelope = message.payload as
+          | RealtimeSnapshotEnvelope
+          | undefined;
+        if (
+          roleRef.current !== "host" ||
+          envelope?.playerId !== playerId ||
+          !envelope.snapshot
+        ) {
+          return;
+        }
+        queueRealtimeSnapshot(playerId, envelope.snapshot);
+      })
+      .subscribe();
+  };
+
+  const promoteRealtimeSnapshotRelay = (nextPlayers: RoomPlayer[]) => {
+    removeRealtimeSnapshotUplink();
+    nextPlayers
+      .filter(
+        (player) =>
+          player.id !== localIdRef.current &&
+          player.connected &&
+          !player.spectating,
+      )
+      .forEach((player) =>
+        ensureRealtimeSnapshotHostChannel(player.id),
+      );
   };
 
   const broadcast = (packet: RoomPacket, exceptId?: string) => {
@@ -2586,6 +2751,9 @@ function OnlineParty({
         },
       ].sort((a, b) => a.slot - b.slot);
       replacePlayers(next);
+      if (!joiningAsSpectator) {
+        ensureRealtimeSnapshotHostChannel(senderId);
+      }
       sendRealtimePacket(
         {
           type: "welcome",
@@ -2624,15 +2792,19 @@ function OnlineParty({
       routeAttack(senderId, packet.amount);
     }
     if (packet.type === "snapshot") {
-      updateSnapshot(senderId, packet.snapshot);
-      broadcast(
-        {
-          type: "snapshot",
-          playerId: senderId,
-          snapshot: packet.snapshot,
-        },
-        senderId,
-      );
+      if (realtimeChannelRef.current) {
+        queueRealtimeSnapshot(senderId, packet.snapshot);
+      } else {
+        updateSnapshot(senderId, packet.snapshot);
+        broadcast(
+          {
+            type: "snapshot",
+            playerId: senderId,
+            snapshot: packet.snapshot,
+          },
+          senderId,
+        );
+      }
     }
     if (packet.type === "finish") {
       eliminatePlayer(senderId);
@@ -2641,6 +2813,7 @@ function OnlineParty({
 
   const handlePeerDeparture = (peerId: string) => {
     connectionsRef.current.delete(peerId);
+    removeRealtimeSnapshotHostChannel(peerId);
     if (phaseRef.current === "lobby") {
       publishRoster(
         playersRef.current.filter((player) => player.id !== peerId),
@@ -2837,6 +3010,19 @@ function OnlineParty({
     if (packet.type === "snapshot" && packet.playerId) {
       updateSnapshot(packet.playerId, packet.snapshot);
     }
+    if (packet.type === "snapshots") {
+      const snapshotMap = new Map(
+        packet.snapshots.map(({ playerId, snapshot }) => [
+          playerId,
+          snapshot,
+        ]),
+      );
+      const next = playersRef.current.map((player) => {
+        const snapshot = snapshotMap.get(player.id);
+        return snapshot ? { ...player, snapshot } : player;
+      });
+      replacePlayers(next);
+    }
     if (packet.type === "garbage") {
       setGarbageSignal({ id: packet.id, amount: packet.amount });
     }
@@ -3016,6 +3202,9 @@ function OnlineParty({
       const isNewHost = envelope.packet.hostId === localId;
       roleRef.current = isNewHost ? "host" : "guest";
       setRole(isNewHost ? "host" : "guest");
+      if (isNewHost) {
+        promoteRealtimeSnapshotRelay(envelope.packet.players);
+      }
       return;
     }
     if (roleRef.current === "host") {
@@ -3036,6 +3225,7 @@ function OnlineParty({
   };
 
   const removeRealtimeChannel = () => {
+    removeRealtimeSnapshotTransport();
     const channel = realtimeChannelRef.current;
     realtimeChannelRef.current = null;
     realtimeHostIdRef.current = "";
@@ -3089,6 +3279,7 @@ function OnlineParty({
     setRole(isNewHost ? "host" : "guest");
     if (!isNewHost) return;
 
+    promoteRealtimeSnapshotRelay(nextPlayers);
     broadcast({
       type: "host-transfer",
       hostId: nextHost.id,
@@ -3113,6 +3304,7 @@ function OnlineParty({
     connectionAttemptRef.current = attempt;
     localIdRef.current = localId;
     realtimeHostIdRef.current = localId;
+    roomCodeRef.current = code;
     setLocalId(localId);
     setHostId(localId);
     setRoomCode(code);
@@ -3188,6 +3380,7 @@ function OnlineParty({
     const attempt = connectionAttemptRef.current + 1;
     connectionAttemptRef.current = attempt;
     localIdRef.current = localId;
+    roomCodeRef.current = code;
     setLocalId(localId);
     const name = cleanPlayerName(requestedName);
     const channel = supabase.channel(`tetstar-room-${code.toLowerCase()}`, {
@@ -3206,6 +3399,7 @@ function OnlineParty({
         if (connectionAttemptRef.current !== attempt) return;
         if (status === "SUBSCRIBED") {
           setConnectionStatus("호스트의 입장 승인을 기다리고 있습니다.");
+          ensureRealtimeSnapshotUplink(code, localId);
           void channel
             .track({ playerId: localId, name, role: "guest" })
             .then(() => sendRealtimePacket({ type: "join-request", name }));
@@ -3359,6 +3553,24 @@ function OnlineParty({
   const shareSnapshot = (snapshot: GameSnapshot) => {
     const id = localIdRef.current;
     if (!id) return;
+    if (realtimeChannelRef.current) {
+      if (roleRef.current === "host") {
+        queueRealtimeSnapshot(id, snapshot);
+        return;
+      }
+      playersRef.current = playersRef.current.map((player) =>
+        player.id === id ? { ...player, snapshot } : player,
+      );
+      const uplink = realtimeSnapshotUplinkRef.current;
+      if (uplink && realtimeSnapshotUplinkReadyRef.current) {
+        void uplink.send({
+          type: "broadcast",
+          event: "snapshot",
+          payload: { playerId: id, snapshot },
+        });
+      }
+      return;
+    }
     const next = playersRef.current.map((player) =>
       player.id === id ? { ...player, snapshot } : player,
     );
@@ -3370,8 +3582,6 @@ function OnlineParty({
         playerId: id,
         snapshot,
       } satisfies RoomPacket);
-    } else if (realtimeChannelRef.current) {
-      sendRealtimePacket({ type: "snapshot", snapshot });
     } else if (hostConnectionRef.current?.open) {
       hostConnectionRef.current.send({ type: "snapshot", snapshot } satisfies RoomPacket);
     }
@@ -3509,6 +3719,7 @@ function OnlineParty({
     hostConnectionRef.current = null;
     playersRef.current = [];
     localIdRef.current = "";
+    roomCodeRef.current = "";
     roleRef.current = null;
     setPlayers([]);
     setLocalId("");
@@ -3545,6 +3756,8 @@ function OnlineParty({
       hostConnectionRef.current?.close();
       peerRef.current?.destroy();
     },
+    // The teardown must run once and reads the latest connection objects from refs.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [],
   );
 
@@ -4049,6 +4262,9 @@ function OnlineParty({
                   onItemPickup={collectItem}
                   onFinish={finishLocalPlayer}
                   onSnapshot={shareSnapshot}
+                  snapshotIntervalMs={
+                    supabase ? REALTIME_SNAPSHOT_UPLINK_MS : 180
+                  }
                 />
               </div>
               {isSpectating && phase !== "ended" && (
