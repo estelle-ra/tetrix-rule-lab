@@ -201,7 +201,8 @@ test("ships without starter-only assets", async () => {
   assert.match(gameClient, /type: "lobby"/);
   assert.match(gameClient, /RETURN TO LOBBY/);
   assert.match(gameClient, /Numpad/);
-  assert.match(gameClient, /event\.code !== "KeyI"/);
+  assert.match(gameClient, /event\.code !== "KeyE"/);
+  assert.doesNotMatch(gameClient, /event\.code !== "KeyI"/);
   assert.match(gameClient, /repeatHandles\.current\.get\(token\) !== handle/);
   assert.match(
     gameClient,

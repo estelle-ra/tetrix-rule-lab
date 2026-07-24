@@ -3590,7 +3590,7 @@ function OnlineParty({
         return;
       }
       if (
-        event.code !== "KeyI" ||
+        event.code !== "KeyE" ||
         !matchRules.itemsEnabled ||
         !itemInventoryRef.current.length
       ) {
@@ -3887,7 +3887,7 @@ function OnlineParty({
           </div>
           <small>
             {currentItem
-              ? `SELECTED · ${ITEM_META[currentItem].short} ×${itemRemaining} · 클릭/Q 선택 · I 사용`
+              ? `SELECTED · ${ITEM_META[currentItem].short} ×${itemRemaining} · 클릭/Q 선택 · E 사용`
               : "아이템 블록이 든 줄을 지우세요"}
           </small>
           <button
@@ -4025,7 +4025,7 @@ function OnlineParty({
               {matchRules.targetMode.toUpperCase()} · 1–7 TARGET
               {matchRules.itemsEnabled
                 ? currentItem
-                  ? ` · I ${ITEM_META[currentItem].short} ×${itemRemaining}`
+                  ? ` · E ${ITEM_META[currentItem].short} ×${itemRemaining}`
                   : " · ITEM EMPTY"
                 : " · ITEMS OFF"}
             </em>
