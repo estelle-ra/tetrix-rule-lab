@@ -69,8 +69,8 @@ type Rules = {
   targetMode: "cycle" | "random" | "all" | "manual";
   itemsEnabled: boolean;
   itemMode: "stock" | "blocks";
-  itemLimit: number;
   itemPool: ItemType[];
+  itemCounts: Record<ItemType, number>;
 };
 
 type GameSnapshot = {
@@ -197,6 +197,7 @@ const JOYSTICK_HORIZONTAL_ARR_MS = 66;
 const INK_EFFECT_MS = 4200;
 const SPEED_EFFECT_MS = 7000;
 const SPIN_EFFECT_MS = 5000;
+const MAX_ITEM_INVENTORY = 30;
 const PIECES: PieceName[] = ["I", "J", "L", "O", "S", "T", "Z"];
 const ITEM_TYPES: ItemType[] = ["ink", "speed", "odd", "spin", "star"];
 const ITEM_META: Record<
@@ -318,8 +319,14 @@ const DEFAULT_RULES: Rules = {
   targetMode: "cycle",
   itemsEnabled: false,
   itemMode: "stock",
-  itemLimit: 3,
   itemPool: [...ITEM_TYPES],
+  itemCounts: {
+    ink: 1,
+    speed: 1,
+    odd: 1,
+    spin: 1,
+    star: 1,
+  },
 };
 
 const SINGLE_CONTROLS: Controls = {
@@ -462,16 +469,28 @@ function randomItem(
   return pool[Math.floor(random() * pool.length)];
 }
 
+function itemCountFor(rules: Rules, item: ItemType): number {
+  const configured = rules.itemCounts?.[item];
+  return Math.max(
+    1,
+    Math.min(5, Number.isFinite(configured) ? Math.round(configured) : 1),
+  );
+}
+
 function startingItemInventory(rules: Rules, seed?: number): ItemType[] {
   if (!rules.itemsEnabled || rules.itemMode === "blocks") return [];
   const random =
     seed === undefined
       ? Math.random
       : createSeededRandom((seed ^ 0x51f15e5d) >>> 0);
-  return Array.from(
-    { length: Math.max(1, rules.itemLimit || DEFAULT_RULES.itemLimit) },
-    () => randomItem(rules, random),
+  const inventory = enabledItems(rules).flatMap((item) =>
+    Array<ItemType>(itemCountFor(rules, item)).fill(item),
   );
+  for (let index = inventory.length - 1; index > 0; index -= 1) {
+    const swap = Math.floor(random() * (index + 1));
+    [inventory[index], inventory[swap]] = [inventory[swap], inventory[index]];
+  }
+  return inventory;
 }
 
 function starHoleCells(board: Board): Array<[number, number]> {
@@ -2166,10 +2185,10 @@ function OnlineParty({
     setPlayers(next);
   };
 
-  const replaceItemInventory = (next: ItemType[]) => {
+  const replaceItemInventory = useCallback((next: ItemType[]) => {
     itemInventoryRef.current = next;
     setItemInventory(next);
-  };
+  }, []);
 
   const appendChat = (message: ChatMessage) => {
     const next = [...chatMessagesRef.current, message].slice(-80);
@@ -2411,14 +2430,15 @@ function OnlineParty({
         player.connected,
     );
     if (!sender || !target) return;
-    const used = itemUsesRef.current.get(fromId) ?? 0;
+    const useKey = `${fromId}:${item}`;
+    const used = itemUsesRef.current.get(useKey) ?? 0;
     if (
       rulesRef.current.itemMode === "stock" &&
-      used >= rulesRef.current.itemLimit
+      used >= itemCountFor(rulesRef.current, item)
     ) {
       return;
     }
-    itemUsesRef.current.set(fromId, used + 1);
+    itemUsesRef.current.set(useKey, used + 1);
     const id = Date.now() + used;
     const duration =
       item === "ink"
@@ -3326,9 +3346,23 @@ function OnlineParty({
   };
 
   const collectItem = (item: ItemType) => {
-    const next = [...itemInventoryRef.current, item].slice(-8);
+    const next = [...itemInventoryRef.current, item].slice(
+      -MAX_ITEM_INVENTORY,
+    );
     replaceItemInventory(next);
   };
+
+  const selectInventoryItem = useCallback(
+    (item: ItemType) => {
+      const inventory = itemInventoryRef.current;
+      if (!inventory.includes(item) || inventory[0] === item) return;
+      replaceItemInventory([
+        ...inventory.filter((candidate) => candidate === item),
+        ...inventory.filter((candidate) => candidate !== item),
+      ]);
+    },
+    [replaceItemInventory],
+  );
 
   const activateItem = (targetId: string) => {
     const activeLocalPlayer = playersRef.current.find(
@@ -3480,8 +3514,16 @@ function OnlineParty({
   const isSpectating = Boolean(
     localPlayer && (!localPlayer.alive || localPlayer.spectating),
   );
+  const inventoryCounts = ITEM_TYPES.reduce<Record<ItemType, number>>(
+    (counts, item) => ({
+      ...counts,
+      [item]: itemInventory.filter((candidate) => candidate === item).length,
+    }),
+    { ink: 0, speed: 0, odd: 0, spin: 0, star: 0 },
+  );
   const currentItem = itemInventory[0] ?? null;
-  const itemRemaining = itemInventory.length;
+  const itemRemaining = currentItem ? inventoryCounts[currentItem] : 0;
+  const itemTotal = itemInventory.length;
   const survivors = players.filter(
     (player) => player.alive && player.connected,
   ).length;
@@ -3525,6 +3567,21 @@ function OnlineParty({
         }
         return;
       }
+      if (event.code === "KeyQ" && itemInventoryRef.current.length) {
+        const availableItems = ITEM_TYPES.filter((item) =>
+          itemInventoryRef.current.includes(item),
+        );
+        const currentIndex = currentItem
+          ? availableItems.indexOf(currentItem)
+          : -1;
+        const nextItem =
+          availableItems[(currentIndex + 1) % availableItems.length];
+        if (nextItem) {
+          event.preventDefault();
+          selectInventoryItem(nextItem);
+        }
+        return;
+      }
       if (
         event.code !== "KeyI" ||
         !matchRules.itemsEnabled ||
@@ -3550,10 +3607,12 @@ function OnlineParty({
     window.addEventListener("keydown", handleShortcut);
     return () => window.removeEventListener("keydown", handleShortcut);
   }, [
+    currentItem,
     isSpectating,
     matchRules.itemsEnabled,
     phase,
     remotePlayers,
+    selectInventoryItem,
     selectedTargetId,
   ]);
 
@@ -3717,7 +3776,11 @@ function OnlineParty({
               {matchRules.targetMode.toUpperCase()} · 아이템{" "}
               {matchRules.itemsEnabled
                 ? `${matchRules.itemMode.toUpperCase()} · ${enabledItems(matchRules)
-                    .map((item) => ITEM_META[item].short)
+                    .map((item) =>
+                      matchRules.itemMode === "stock"
+                        ? `${ITEM_META[item].short}×${itemCountFor(matchRules, item)}`
+                        : ITEM_META[item].short,
+                    )
                     .join(" / ")}`
                 : "OFF"}
             </span>
@@ -3791,25 +3854,33 @@ function OnlineParty({
               : "ITEM STOCK"}
           </span>
           <div>
-            {itemInventory.length ? (
-              itemInventory.map((item, index) => (
-                <i
-                  className={`inventory-item item-${item} ${
-                    index === 0 ? "inventory-next" : ""
-                  }`}
-                  key={`${item}-${index}`}
-                  title={ITEM_META[item].label}
-                >
-                  {ITEM_META[item].icon}
-                </i>
-              ))
+            {itemTotal ? (
+              ITEM_TYPES.filter((item) => inventoryCounts[item] > 0).map(
+                (item) => (
+                  <button
+                    type="button"
+                    className={`inventory-item item-${item} ${
+                      currentItem === item ? "inventory-next" : ""
+                    }`}
+                    key={item}
+                    title={`${ITEM_META[item].label} 선택`}
+                    aria-label={`${ITEM_META[item].label} 아이템 선택, ${inventoryCounts[item]}개 보유`}
+                    aria-pressed={currentItem === item}
+                    onClick={() => selectInventoryItem(item)}
+                  >
+                    <i>{ITEM_META[item].icon}</i>
+                    <strong>{ITEM_META[item].short}</strong>
+                    <small>×{inventoryCounts[item]}</small>
+                  </button>
+                ),
+              )
             ) : (
               <em>EMPTY</em>
             )}
           </div>
           <small>
             {currentItem
-              ? `NEXT · ${ITEM_META[currentItem].short} · 상대 선택 후 I`
+              ? `SELECTED · ${ITEM_META[currentItem].short} ×${itemRemaining} · 클릭/Q 선택 · I 사용`
               : "아이템 블록이 든 줄을 지우세요"}
           </small>
         </div>
@@ -4118,6 +4189,21 @@ function RulesPanel({
         : [...pool, item],
     });
   };
+  const setItemCount = (item: ItemType, count: number) => {
+    setRules({
+      ...rules,
+      itemCounts: {
+        ...DEFAULT_RULES.itemCounts,
+        ...rules.itemCounts,
+        [item]: Math.max(1, Math.min(5, Math.round(count))),
+      },
+    });
+  };
+  const enabledItemTypes = enabledItems(rules);
+  const stockTotal = enabledItemTypes.reduce(
+    (total, item) => total + itemCountFor(rules, item),
+    0,
+  );
 
   return (
     <div
@@ -4289,35 +4375,19 @@ function RulesPanel({
                       완성해 지워야 인벤토리에 들어옵니다.
                     </small>
                   </label>
-                  {rules.itemMode === "stock" && (
-                    <label>
-                      <span>
-                        <strong>시작 아이템 수</strong>
-                        <em>게임당 {rules.itemLimit}개</em>
-                      </span>
-                      <input
-                        type="range"
-                        min="1"
-                        max="7"
-                        step="1"
-                        value={rules.itemLimit}
-                        onChange={(event) =>
-                          setRules({
-                            ...rules,
-                            itemLimit: Number(event.target.value),
-                          })
-                        }
-                      />
-                    </label>
-                  )}
                   <div className="item-pool-settings">
                     <span>
                       <strong>사용 아이템</strong>
-                      <em>{enabledItems(rules).length} / {ITEM_TYPES.length}</em>
+                      <em>
+                        {enabledItemTypes.length}종
+                        {rules.itemMode === "stock"
+                          ? ` · 총 ${stockTotal}개`
+                          : ""}
+                      </em>
                     </span>
                     <div>
                       {ITEM_TYPES.map((item) => {
-                        const active = enabledItems(rules).includes(item);
+                        const active = enabledItemTypes.includes(item);
                         return (
                           <button
                             className={active ? "active" : ""}
@@ -4328,13 +4398,61 @@ function RulesPanel({
                           >
                             <i>{ITEM_META[item].icon}</i>
                             <strong>{ITEM_META[item].short}</strong>
-                            <small>{ITEM_META[item].label}</small>
+                            <small>
+                              {ITEM_META[item].label}
+                              {active && rules.itemMode === "stock"
+                                ? ` · ×${itemCountFor(rules, item)}`
+                                : ""}
+                            </small>
                           </button>
                         );
                       })}
                     </div>
                     <small>최소 한 종류는 항상 활성화됩니다.</small>
                   </div>
+                  {rules.itemMode === "stock" && (
+                    <div className="item-count-settings">
+                      <span>
+                        <strong>종류별 시작 수량</strong>
+                        <em>각 1–5개</em>
+                      </span>
+                      <div>
+                        {enabledItemTypes.map((item) => (
+                          <div key={item}>
+                            <span>
+                              <i>{ITEM_META[item].icon}</i>
+                              <strong>{ITEM_META[item].short}</strong>
+                            </span>
+                            <button
+                              type="button"
+                              aria-label={`${ITEM_META[item].label} 수량 감소`}
+                              onClick={() =>
+                                setItemCount(
+                                  item,
+                                  itemCountFor(rules, item) - 1,
+                                )
+                              }
+                            >
+                              −
+                            </button>
+                            <em>{itemCountFor(rules, item)}</em>
+                            <button
+                              type="button"
+                              aria-label={`${ITEM_META[item].label} 수량 증가`}
+                              onClick={() =>
+                                setItemCount(
+                                  item,
+                                  itemCountFor(rules, item) + 1,
+                                )
+                              }
+                            >
+                              +
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </section>
               )}
             </>
@@ -4496,7 +4614,15 @@ export default function GameClient() {
     if (!saved) return;
     const timer = window.setTimeout(() => {
       try {
-        setRulesState({ ...DEFAULT_RULES, ...JSON.parse(saved) });
+        const parsed = JSON.parse(saved) as Partial<Rules>;
+        setRulesState({
+          ...DEFAULT_RULES,
+          ...parsed,
+          itemCounts: {
+            ...DEFAULT_RULES.itemCounts,
+            ...parsed.itemCounts,
+          },
+        });
       } catch {
         setRulesState(DEFAULT_RULES);
       }

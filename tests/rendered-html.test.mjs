@@ -162,6 +162,10 @@ test("ships without starter-only assets", async () => {
   assert.match(gameClient, /type: "item-state"/);
   assert.match(gameClient, /type ItemType = "ink" \| "speed" \| "odd" \| "spin" \| "star"/);
   assert.match(gameClient, /itemMode: "stock" \| "blocks"/);
+  assert.match(gameClient, /itemCounts: Record<ItemType, number>/);
+  assert.match(gameClient, /function itemCountFor/);
+  assert.match(gameClient, /enabledItems\(rules\)\.flatMap/);
+  assert.doesNotMatch(gameClient, /itemLimit/);
   assert.match(gameClient, /SPEED_EFFECT_MS = 7000/);
   assert.match(gameClient, /SPIN_EFFECT_MS = 5000/);
   assert.match(gameClient, /function createSeededRandom/);
@@ -184,6 +188,9 @@ test("ships without starter-only assets", async () => {
   assert.match(gameClient, /다음 경기부터 참가합니다/);
   assert.match(gameClient, /screen-multiplayer-playing/);
   assert.match(gameClient, /mobile-item-action/);
+  assert.match(gameClient, /selectInventoryItem/);
+  assert.match(gameClient, /event\.code === "KeyQ"/);
+  assert.match(gameClient, /aria-pressed=\{currentItem === item\}/);
   assert.match(gameClient, /에게 \$\{ITEM_META\[currentItem\]\.label\} 아이템 사용/);
   assert.match(gameClient, /type: "lobby"/);
   assert.match(gameClient, /RETURN TO LOBBY/);
@@ -251,6 +258,8 @@ test("ships without starter-only assets", async () => {
   assert.match(globalCss, /\.rules-control-options/);
   assert.match(globalCss, /\.rules-item-settings/);
   assert.match(globalCss, /\.item-pool-settings/);
+  assert.match(globalCss, /\.item-count-settings/);
+  assert.match(globalCss, /\.inventory-item\.inventory-next/);
   assert.match(globalCss, /\.item-inventory/);
   assert.match(globalCss, /\.item-cell/);
   assert.match(globalCss, /\.board-item-status/);
