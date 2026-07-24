@@ -176,6 +176,11 @@ test("ships without starter-only assets", async () => {
   assert.match(gameClient, /블록 오른쪽으로 한 칸 이동/);
   assert.match(gameClient, /setInkSignal\(\{ id: 0 \}\)/);
   assert.match(gameClient, /className="match-result-layer"/);
+  assert.match(gameClient, /eliminatedAt\?: number/);
+  assert.match(gameClient, /const eliminationDifference/);
+  assert.match(gameClient, /formatResultTime/);
+  assert.match(gameClient, /aria-label="최종 순위"/);
+  assert.match(gameClient, />RESULTS</);
   assert.match(gameClient, /className="winner-reveal"/);
   assert.match(gameClient, /showResultCard/);
   assert.match(gameClient, /GARBAGE PRESSURE/);
@@ -196,6 +201,9 @@ test("ships without starter-only assets", async () => {
   assert.match(globalCss, /\.mobile-opponent-strip/);
   assert.match(globalCss, /grid-template-areas: "hold board next"/);
   assert.match(globalCss, /\.match-result-card/);
+  assert.match(globalCss, /\.result-title-row/);
+  assert.match(globalCss, /\.result-rank/);
+  assert.match(globalCss, /\.result-survival/);
   assert.match(globalCss, /\.winner-reveal/);
   assert.match(globalCss, /\.touch-direction/);
   assert.match(globalCss, /\.control-layout-options/);

@@ -99,6 +99,7 @@ type RoomPlayer = {
   alive: boolean;
   connected: boolean;
   spectating?: boolean;
+  eliminatedAt?: number;
   snapshot?: GameSnapshot;
 };
 
@@ -153,6 +154,7 @@ type RoomPacket =
       type: "end";
       winnerId: string;
       winnerName: string;
+      endedAt: number;
       players: RoomPlayer[];
     }
   | { type: "full"; reason: "ROOM_FULL" | "MATCH_STARTED" };
@@ -370,6 +372,14 @@ function formatTime(totalSeconds: number) {
   const minutes = Math.floor(totalSeconds / 60);
   const seconds = totalSeconds % 60;
   return `${minutes}:${String(seconds).padStart(2, "0")}`;
+}
+
+function formatResultTime(timeMs: number) {
+  const safeTime = Math.max(0, Math.round(timeMs));
+  const minutes = Math.floor(safeTime / 60000);
+  const seconds = Math.floor((safeTime % 60000) / 1000);
+  const milliseconds = safeTime % 1000;
+  return `${minutes}:${String(seconds).padStart(2, "0")}.${String(milliseconds).padStart(3, "0")}`;
 }
 
 function MiniPiece({ type }: { type: PieceName | null }) {
@@ -1659,6 +1669,8 @@ function OnlineParty({
   const [roomError, setRoomError] = useState("");
   const [winnerId, setWinnerId] = useState("");
   const [winnerName, setWinnerName] = useState("");
+  const [matchStartedAt, setMatchStartedAt] = useState(0);
+  const [matchEndedAt, setMatchEndedAt] = useState(0);
   const [showResultCard, setShowResultCard] = useState(false);
   const [localEndReason, setLocalEndReason] =
     useState<FinishReason>("topout");
@@ -1743,10 +1755,15 @@ function OnlineParty({
     }
   };
 
-  const beginMatchEnd = (nextWinnerId: string, nextWinnerName: string) => {
+  const beginMatchEnd = (
+    nextWinnerId: string,
+    nextWinnerName: string,
+    endedAt = Date.now(),
+  ) => {
     clearResultReveal();
     setWinnerId(nextWinnerId);
     setWinnerName(nextWinnerName);
+    setMatchEndedAt(endedAt);
     setShowResultCard(false);
     setPhase("ended");
     resultRevealTimerRef.current = window.setTimeout(() => {
@@ -1897,23 +1914,30 @@ function OnlineParty({
           (a, b) => (b.snapshot?.score ?? 0) - (a.snapshot?.score ?? 0),
         )[0];
     if (!winner) return;
+    const endedAt = Date.now();
     const finalPlayers = next.map((player) =>
-      player.id === winner.id ? { ...player, alive: true } : player,
+      player.id === winner.id
+        ? { ...player, alive: true, eliminatedAt: undefined }
+        : player,
     );
     replacePlayers(finalPlayers);
-    beginMatchEnd(winner.id, winner.name);
+    beginMatchEnd(winner.id, winner.name, endedAt);
     reportLocalMatchResult(finalPlayers, winner.id);
     broadcast({
       type: "end",
       winnerId: winner.id,
       winnerName: winner.name,
+      endedAt,
       players: finalPlayers,
     });
   };
 
   const eliminatePlayer = (playerId: string) => {
+    const eliminatedAt = Date.now();
     const next = playersRef.current.map((player) =>
-      player.id === playerId ? { ...player, alive: false } : player,
+      player.id === playerId && player.alive
+        ? { ...player, alive: false, eliminatedAt }
+        : player,
     );
     publishRoster(next);
     concludeIfNeeded(next);
@@ -2133,7 +2157,12 @@ function OnlineParty({
     }
     const next = playersRef.current.map((player) =>
       player.id === peerId
-        ? { ...player, connected: false, alive: false }
+        ? {
+            ...player,
+            connected: false,
+            alive: false,
+            eliminatedAt: player.eliminatedAt ?? Date.now(),
+          }
         : player,
     );
     publishRoster(next);
@@ -2297,6 +2326,8 @@ function OnlineParty({
       setMatchRules(packet.rules);
       setMatchId(packet.matchId);
       activeMatchIdRef.current = packet.matchId;
+      setMatchStartedAt(packet.startAt);
+      setMatchEndedAt(0);
       setWinnerId("");
       setWinnerName("");
       setShowResultCard(false);
@@ -2332,6 +2363,8 @@ function OnlineParty({
       setMatchRules(packet.rules);
       setWinnerId("");
       setWinnerName("");
+      setMatchStartedAt(0);
+      setMatchEndedAt(0);
       setShowResultCard(false);
       setSelectedTargetId("");
       setInkUsed(0);
@@ -2343,7 +2376,7 @@ function OnlineParty({
     if (packet.type === "end") {
       clearCountdown();
       replacePlayers(packet.players);
-      beginMatchEnd(packet.winnerId, packet.winnerName);
+      beginMatchEnd(packet.winnerId, packet.winnerName, packet.endedAt);
       reportLocalMatchResult(packet.players, packet.winnerId);
     }
     if (packet.type === "full") {
@@ -2732,6 +2765,7 @@ function OnlineParty({
         ...player,
         alive: true,
         spectating: false,
+        eliminatedAt: undefined,
         snapshot: undefined,
       }));
     manualTargetsRef.current.clear();
@@ -2741,6 +2775,8 @@ function OnlineParty({
     setAttackLogs([]);
     setWinnerId("");
     setWinnerName("");
+    setMatchStartedAt(0);
+    setMatchEndedAt(0);
     setShowResultCard(false);
     setLocalEndReason("topout");
     replacePlayers(next);
@@ -2767,6 +2803,7 @@ function OnlineParty({
         alive: true,
         connected: true,
         spectating: false,
+        eliminatedAt: undefined,
         snapshot: undefined,
       }));
     if (next.length < 2) {
@@ -2794,6 +2831,8 @@ function OnlineParty({
     setLocalEndReason("topout");
     setMatchId(nextMatchId);
     activeMatchIdRef.current = nextMatchId;
+    setMatchStartedAt(startAt);
+    setMatchEndedAt(0);
     setMatchRules(rulesRef.current);
     setGarbageSignal({ id: 0, amount: 0 });
     broadcast({
@@ -3000,8 +3039,11 @@ function OnlineParty({
   const standings =
     phase === "ended"
       ? players.filter((player) => !player.spectating).sort((a, b) => {
-          if (a.name === winnerName) return -1;
-          if (b.name === winnerName) return 1;
+          if (a.id === winnerId) return -1;
+          if (b.id === winnerId) return 1;
+          const eliminationDifference =
+            (b.eliminatedAt ?? 0) - (a.eliminatedAt ?? 0);
+          if (eliminationDifference !== 0) return eliminationDifference;
           return (b.snapshot?.score ?? 0) - (a.snapshot?.score ?? 0);
         })
       : [];
@@ -3452,24 +3494,48 @@ function OnlineParty({
             ))}
           </div>
           <div className="match-result-card">
-            <span className="eyebrow">MATCH COMPLETE</span>
-            <div className="winner-star" aria-hidden="true">
-              ★
+            <div className="result-title-row">
+              <span>
+                <small>MATCH COMPLETE</small>
+                <strong>RESULTS</strong>
+              </span>
+              <span className="result-survivor">
+                <small>NO. 1 · SURVIVOR</small>
+                <strong>{winnerName}</strong>
+              </span>
             </div>
-            <p>VICTORY</p>
-            <h2>{winnerName}</h2>
-            <small className="result-end-reason">{matchEndDetail}</small>
-            <div className="result-list">
+            <div className="result-list" aria-label="최종 순위">
               {standings.map((player, index) => (
                 <div
-                  className={index === 0 ? "result-winner" : ""}
+                  className={[
+                    index === 0 ? "result-winner" : "",
+                    player.id === localId ? "result-self" : "",
+                  ]
+                    .filter(Boolean)
+                    .join(" ")}
                   key={player.id}
                 >
-                  <span>#{index + 1}</span>
-                  <strong>{player.name}</strong>
-                  <em>{player.snapshot?.lines ?? 0} LINES</em>
-                  <em>
-                    {(player.snapshot?.score ?? 0).toLocaleString()} PTS
+                  <span className="result-rank">
+                    <small>NO.</small>
+                    {index + 1}
+                  </span>
+                  <span className="result-player">
+                    <strong>{player.name}</strong>
+                    <small>
+                      {player.snapshot?.lines ?? 0} LINES ·{" "}
+                      {(player.snapshot?.score ?? 0).toLocaleString()} PTS
+                    </small>
+                  </span>
+                  <em className="result-survival">
+                    {index === 0
+                      ? "SURVIVOR"
+                      : formatResultTime(
+                          Math.max(
+                            0,
+                            (player.eliminatedAt || matchEndedAt) -
+                              matchStartedAt,
+                          ),
+                        )}
                   </em>
                 </div>
               ))}

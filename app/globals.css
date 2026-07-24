@@ -2194,37 +2194,61 @@ button.online-choice:hover {
 }
 
 .result-list {
-  border: 1px solid #30353c;
-  margin-top: 28px;
+  display: grid;
+  gap: 7px;
+  margin-top: 20px;
 }
 
 .result-list > div {
   align-items: center;
-  border-bottom: 1px solid #292e34;
+  background: rgba(25, 22, 33, 0.92);
+  border: 1px solid #43344f;
   display: grid;
-  gap: 15px;
-  grid-template-columns: 38px 1fr 90px 100px;
-  min-height: 50px;
-  padding: 0 15px;
+  gap: 18px;
+  grid-template-columns: 68px minmax(0, 1fr) auto;
+  min-height: 64px;
+  padding: 7px 18px;
   text-align: left;
 }
 
-.result-list > div:last-child {
-  border-bottom: 0;
+.result-rank {
+  align-items: baseline;
+  color: #eee6f8;
+  display: flex;
+  font-size: 34px;
+  font-weight: 850;
+  letter-spacing: -0.08em;
+  line-height: 1;
 }
 
-.result-list span {
-  color: var(--orange);
-  font: 12px monospace;
+.result-rank small {
+  color: #8d789f;
+  font: 9px monospace;
+  letter-spacing: 0.04em;
+  margin-right: 3px;
 }
 
-.result-list strong {
-  font-size: 15px;
+.result-player strong,
+.result-player small {
+  display: block;
 }
 
-.result-list em {
-  color: #727a84;
-  font: normal 11px monospace;
+.result-player strong {
+  color: #f3edf8;
+  font-size: 19px;
+  letter-spacing: 0.035em;
+}
+
+.result-player small {
+  color: #80738b;
+  font: 10px monospace;
+  margin-top: 3px;
+}
+
+.result-survival {
+  color: #cbb8da;
+  font: 800 20px monospace;
+  letter-spacing: -0.045em;
   text-align: right;
 }
 
@@ -2270,13 +2294,55 @@ button.online-choice:hover {
     0 35px 100px rgba(0, 0, 0, 0.72),
     0 0 0 1px rgba(255, 255, 255, 0.04) inset;
   max-height: calc(100dvh - 36px);
-  max-width: 620px;
+  max-width: 920px;
   overflow: auto;
   padding: clamp(25px, 4vw, 44px);
   position: relative;
   text-align: center;
-  width: min(100%, 620px);
+  width: min(100%, 920px);
   z-index: 2;
+}
+
+.result-title-row {
+  align-items: end;
+  border-bottom: 2px solid rgba(162, 112, 247, 0.7);
+  display: flex;
+  gap: 24px;
+  justify-content: space-between;
+  padding-bottom: 16px;
+  text-align: left;
+}
+
+.result-title-row span,
+.result-title-row small,
+.result-title-row strong {
+  display: block;
+}
+
+.result-title-row small {
+  color: #a270f7;
+  font: 800 10px monospace;
+  letter-spacing: 0.14em;
+}
+
+.result-title-row > span:first-child > strong {
+  color: #f3edf8;
+  font-size: clamp(32px, 5vw, 54px);
+  letter-spacing: -0.055em;
+  line-height: 0.9;
+  margin-top: 5px;
+}
+
+.result-survivor {
+  text-align: right;
+}
+
+.result-survivor strong {
+  color: var(--lime);
+  font-size: clamp(20px, 3vw, 34px);
+  letter-spacing: -0.035em;
+  margin-top: 4px;
+  overflow-wrap: anywhere;
 }
 
 .winner-reveal {
@@ -2353,15 +2419,28 @@ button.online-choice:hover {
 
 .match-result-card .result-list {
   background: rgba(5, 7, 9, 0.7);
-  margin-top: 24px;
+  margin-top: 18px;
 }
 
 .result-list > .result-winner {
-  background: linear-gradient(90deg, rgba(205, 242, 85, 0.13), transparent);
+  background: linear-gradient(
+    90deg,
+    rgba(162, 112, 247, 0.32),
+    rgba(205, 242, 85, 0.11)
+  );
+  border-color: rgba(205, 242, 85, 0.72);
 }
 
 .result-list > .result-winner strong {
   color: var(--lime);
+}
+
+.result-list > .result-winner .result-survival {
+  color: var(--lime);
+}
+
+.result-list > .result-self {
+  box-shadow: inset 4px 0 0 var(--cyan);
 }
 
 .result-block-burst {
@@ -3856,8 +3935,25 @@ footer {
 
   .result-list > div {
     gap: 8px;
-    grid-template-columns: 30px 1fr 65px 72px;
-    padding: 0 9px;
+    grid-template-columns: 42px minmax(0, 1fr) auto;
+    min-height: 54px;
+    padding: 6px 9px;
+  }
+
+  .result-rank {
+    font-size: 26px;
+  }
+
+  .result-player strong {
+    font-size: 14px;
+  }
+
+  .result-player small {
+    font-size: 8px;
+  }
+
+  .result-survival {
+    font-size: 13px;
   }
 
   .result-actions {
@@ -3886,13 +3982,22 @@ footer {
     overflow-y: auto;
   }
 
-  .match-result-card h2 {
-    font-size: clamp(36px, 13vw, 56px);
+  .result-title-row {
+    align-items: start;
+    gap: 8px;
+  }
+
+  .result-title-row > span:first-child > strong {
+    font-size: 32px;
+  }
+
+  .result-survivor strong {
+    font-size: 18px;
   }
 
   .match-result-card .result-list {
     margin-top: 12px;
-    max-height: min(calc(var(--visual-viewport-height) * 0.24), 170px);
+    max-height: min(calc(var(--visual-viewport-height) * 0.34), 280px);
     overflow-y: auto;
   }
 
