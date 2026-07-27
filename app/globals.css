@@ -1916,7 +1916,7 @@ button.online-choice:hover {
   color: #4c525a;
   display: grid;
   gap: 11px;
-  grid-template-columns: 27px 1fr auto;
+  grid-template-columns: 27px minmax(0, 1fr) auto auto;
   min-height: 62px;
   padding: 0 13px;
 }
@@ -1944,6 +1944,31 @@ button.online-choice:hover {
 
 .slot-filled > em {
   color: var(--lime);
+}
+
+.slot-reconnecting {
+  border-color: rgba(255, 160, 70, 0.55);
+  opacity: 0.72;
+}
+
+.slot-reconnecting > em {
+  color: var(--orange);
+}
+
+.kick-player {
+  background: transparent;
+  border: 1px solid #484f59;
+  color: #9ca3ad;
+  font: 700 9px monospace;
+  letter-spacing: 0.08em;
+  min-height: 28px;
+  padding: 0 9px;
+}
+
+.kick-player:hover,
+.kick-player:focus-visible {
+  border-color: var(--orange);
+  color: var(--orange);
 }
 
 .start-online {

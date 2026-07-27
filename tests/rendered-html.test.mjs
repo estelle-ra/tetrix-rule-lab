@@ -147,6 +147,10 @@ test("ships without starter-only assets", async () => {
   assert.match(gameClient, /submit_game_result/);
   assert.match(gameClient, /NEW PERSONAL BEST/);
   assert.match(gameClient, /inputBlockedUntilRef/);
+  assert.match(
+    gameClient,
+    /action === "down" \|\|\s*action === "hardDrop"/,
+  );
   assert.match(gameClient, /clearRepeatHandles/);
   assert.match(gameClient, /RETRY JOIN/);
   assert.match(gameClient, /MULTIPLAYER INVITE/);
@@ -286,18 +290,28 @@ test("ships without starter-only assets", async () => {
   assert.match(gameClient, /const BUFFER_ROWS = 3/);
   assert.match(gameClient, /const VISIBLE_HEIGHT = 20/);
   assert.match(gameClient, /const HEIGHT = VISIBLE_HEIGHT \+ BUFFER_ROWS/);
+  assert.match(gameClient, /const DANGER_VISIBLE_ROWS = 7/);
   assert.match(gameClient, /VERSUS_SPEED_STEP_SECONDS = 20/);
-  assert.match(gameClient, /VERSUS_SPEED_STEP_MS = 45/);
+  assert.match(gameClient, /VERSUS_SPEED_STEP_MS = 70/);
   assert.match(gameClient, /VERSUS_MIN_GRAVITY_MS = 70/);
+  assert.match(gameClient, /MULTIPLAYER_DEFAULT_GRAVITY_MS = 720/);
   assert.match(gameClient, /GRAVITY_HEARTBEAT_MS = 32/);
-  assert.match(gameClient, /pieceCells\(activeRef\.current\)/);
+  assert.match(gameClient, /stepDownRef\.current\(\)/);
   assert.doesNotMatch(
     gameClient,
     /\[active, lines, mode, rules\.gravity, seconds/,
   );
   assert.match(gameClient, /GARBAGE_QUEUE_DELAY_MS = 3500/);
   assert.match(gameClient, /MAX_GARBAGE_QUEUE = 40/);
-  assert.match(gameClient, /for \(const offset of \[-1, 1, -2, 2, -3, 3\]\)/);
+  assert.doesNotMatch(
+    gameClient,
+    /for \(const offset of \[-1, 1, -2, 2, -3, 3\]\)/,
+  );
+  assert.doesNotMatch(gameClient, /enteringFromBuffer/);
+  assert.match(
+    gameClient,
+    /\.slice\(0, BUFFER_ROWS \+ DANGER_VISIBLE_ROWS\)/,
+  );
   assert.match(gameClient, /sharedStartAt=\{matchStartedAt\}/);
   assert.match(gameClient, /versusSpeedSteps \* VERSUS_SPEED_STEP_MS/);
   assert.match(gameClient, /Math\.floor\(\(Date\.now\(\) - sharedStartAt\) \/ 1000\)/);
@@ -308,6 +322,15 @@ test("ships without starter-only assets", async () => {
   assert.match(gameClient, /\{ length: VISIBLE_HEIGHT \* WIDTH \}/);
   assert.match(gameClient, /const enqueueGarbage/);
   assert.match(gameClient, /const cancelPendingGarbage/);
+  assert.match(gameClient, /\| \{ type: "kicked" \}/);
+  assert.match(gameClient, /const kickPlayer = \(playerId: string\)/);
+  assert.match(gameClient, /className="kick-player"/);
+  assert.match(gameClient, /"RECONNECTING"/);
+  assert.match(gameClient, /sendRealtimePacket\(\{ type: "leave" \}\)/);
+  assert.match(
+    gameClient,
+    /itemsEnabled: false,\s*gravity: MULTIPLAYER_DEFAULT_GRAVITY_MS/,
+  );
   assert.match(gameClient, /pendingGarbage=\{pendingGarbage\}/);
   assert.match(
     gameClient,
@@ -358,6 +381,8 @@ test("ships without starter-only assets", async () => {
   assert.match(globalCss, /padding-top: calc\(var\(--cell\) \* 3\)/);
   assert.match(globalCss, /margin-bottom: calc\(var\(--cell\) \* 2\)/);
   assert.match(globalCss, /\.garbage-meter/);
+  assert.match(globalCss, /\.slot-reconnecting/);
+  assert.match(globalCss, /\.kick-player/);
   assert.match(globalCss, /\.board-danger/);
   assert.match(globalCss, /\.combo-attack-effect/);
   assert.match(globalCss, /\.item-launch-effect/);

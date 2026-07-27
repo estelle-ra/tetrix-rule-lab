@@ -167,6 +167,8 @@ type RoomPacket =
   | { type: "attack-log"; log: AttackLog }
   | { type: "chat-submit"; text: string }
   | { type: "chat"; message: ChatMessage }
+  | { type: "leave" }
+  | { type: "kicked" }
   | { type: "lobby"; players: RoomPlayer[]; rules: Rules }
   | { type: "host-transfer"; hostId: string; players: RoomPlayer[] }
   | { type: "snapshot"; playerId?: string; snapshot: GameSnapshot }
@@ -213,6 +215,7 @@ const WIDTH = 10;
 const VISIBLE_HEIGHT = 20;
 const BUFFER_ROWS = 3;
 const HEIGHT = VISIBLE_HEIGHT + BUFFER_ROWS;
+const DANGER_VISIBLE_ROWS = 7;
 const LOCK_DELAY_MS = 350;
 const MAX_LOCK_RESETS = 8;
 const MAX_GROUNDED_MS = 1800;
@@ -225,8 +228,9 @@ const INK_EFFECT_MS = 4200;
 const SPEED_EFFECT_MS = 7000;
 const SPIN_EFFECT_MS = 5000;
 const VERSUS_SPEED_STEP_SECONDS = 20;
-const VERSUS_SPEED_STEP_MS = 45;
+const VERSUS_SPEED_STEP_MS = 70;
 const VERSUS_MIN_GRAVITY_MS = 70;
+const MULTIPLAYER_DEFAULT_GRAVITY_MS = 720;
 const GRAVITY_HEARTBEAT_MS = 32;
 const GARBAGE_QUEUE_DELAY_MS = 3500;
 const MAX_GARBAGE_QUEUE = 40;
@@ -492,16 +496,6 @@ function findSpawnPosition(board: Board, type: PieceName): Piece | null {
   for (let y = BUFFER_ROWS; y >= 0; y -= 1) {
     const candidate = spawn(type, y);
     if (!collides(board, candidate)) return candidate;
-  }
-  // When the center spawn is blocked inside the three-row safety buffer,
-  // try the nearby columns before declaring a top-out. This gives the player
-  // one last visible chance to steer the piece back into the main field.
-  for (const offset of [-1, 1, -2, 2, -3, 3]) {
-    for (let y = BUFFER_ROWS; y >= 0; y -= 1) {
-      const baseCandidate = spawn(type, y);
-      const candidate = { ...baseCandidate, x: baseCandidate.x + offset };
-      if (!collides(board, candidate)) return candidate;
-    }
   }
   return null;
 }
@@ -1003,14 +997,9 @@ function GameBoard({
     let lastDropAt = window.performance.now();
     const timer = window.setInterval(() => {
       const now = window.performance.now();
-      const enteringFromBuffer = pieceCells(activeRef.current).every(
-        ([, y]) => y < BUFFER_ROWS,
-      );
-      const gravity = enteringFromBuffer
-        ? 70
-        : speedActive
-          ? Math.max(55, normalGravity * 0.24)
-          : normalGravity;
+      const gravity = speedActive
+        ? Math.max(55, normalGravity * 0.24)
+        : normalGravity;
       if (now - lastDropAt < gravity) return;
       lastDropAt = now;
       stepDownRef.current();
@@ -1364,7 +1353,10 @@ function GameBoard({
     (action: GameAction) => {
       if (status !== "playing") return;
       if (
-        (action === "left" || action === "right" || action === "down") &&
+        (action === "left" ||
+          action === "right" ||
+          action === "down" ||
+          action === "hardDrop") &&
         window.performance.now() < inputBlockedUntilRef.current
       ) {
         return;
@@ -1626,7 +1618,7 @@ function GameBoard({
   const bufferDanger = useMemo(
     () =>
       board
-        .slice(0, BUFFER_ROWS + 3)
+        .slice(0, BUFFER_ROWS + DANGER_VISIBLE_ROWS)
         .some((row) => row.some(Boolean)),
     [board],
   );
@@ -2395,6 +2387,7 @@ function OnlineParty({
   const realtimeSnapshotBatchTimerRef = useRef<number | null>(null);
   const realtimeHostIdRef = useRef("");
   const presenceDepartureTimersRef = useRef<Map<string, number>>(new Map());
+  const kickedPlayersRef = useRef(new Set<string>());
   const roomCodeRef = useRef("");
   const hostConnectionRef = useRef<DataConnection | null>(null);
   const connectionsRef = useRef<Map<string, DataConnection>>(new Map());
@@ -2422,6 +2415,7 @@ function OnlineParty({
     () => undefined,
   );
   const shortcutItemRef = useRef<(targetId: string) => void>(() => undefined);
+  const leaveRoomRef = useRef<(reason?: string) => void>(() => undefined);
   const onlineArenaRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -3072,7 +3066,34 @@ function OnlineParty({
     broadcast({ type: "attack-log", log });
   };
 
+  const reconcilePlayerDeparture = (peerId: string) => {
+    connectionsRef.current.delete(peerId);
+    removeRealtimeSnapshotHostChannel(peerId);
+    if (phaseRef.current === "lobby") {
+      publishRoster(
+        playersRef.current.filter((player) => player.id !== peerId),
+      );
+      return;
+    }
+    const next = playersRef.current.map((player) =>
+      player.id === peerId
+        ? {
+            ...player,
+            connected: false,
+            alive: false,
+            eliminatedAt: player.eliminatedAt ?? Date.now(),
+          }
+        : player,
+    );
+    publishRoster(next);
+    concludeIfNeeded(next);
+  };
+
   const handleHostPacket = (senderId: string, packet: RoomPacket) => {
+    if (kickedPlayersRef.current.has(senderId)) {
+      sendRealtimePacket({ type: "kicked" }, senderId);
+      return;
+    }
     if (packet.type === "join-request") {
       if (playersRef.current.some((player) => player.id === senderId)) {
         sendRealtimePacket(
@@ -3152,6 +3173,10 @@ function OnlineParty({
       });
       return;
     }
+    if (packet.type === "leave") {
+      reconcilePlayerDeparture(senderId);
+      return;
+    }
     if (packet.type === "chat-submit") {
       const sender = playersRef.current.find((player) => player.id === senderId);
       const text = cleanChatText(packet.text);
@@ -3188,29 +3213,6 @@ function OnlineParty({
     if (packet.type === "finish") {
       eliminatePlayer(senderId);
     }
-  };
-
-  const handlePeerDeparture = (peerId: string) => {
-    connectionsRef.current.delete(peerId);
-    removeRealtimeSnapshotHostChannel(peerId);
-    if (phaseRef.current === "lobby") {
-      publishRoster(
-        playersRef.current.filter((player) => player.id !== peerId),
-      );
-      return;
-    }
-    const next = playersRef.current.map((player) =>
-      player.id === peerId
-        ? {
-            ...player,
-            connected: false,
-            alive: false,
-            eliminatedAt: player.eliminatedAt ?? Date.now(),
-          }
-        : player,
-    );
-    publishRoster(next);
-    concludeIfNeeded(next);
   };
 
   const acceptConnection = (connection: DataConnection) => {
@@ -3274,8 +3276,8 @@ function OnlineParty({
     connection.on("data", (data) =>
       handleHostPacket(connection.peer, data as RoomPacket),
     );
-    connection.on("close", () => handlePeerDeparture(connection.peer));
-    connection.on("error", () => handlePeerDeparture(connection.peer));
+    connection.on("close", () => reconcilePlayerDeparture(connection.peer));
+    connection.on("error", () => reconcilePlayerDeparture(connection.peer));
   };
 
   const mapPeerError = (error: unknown) => {
@@ -3289,6 +3291,7 @@ function OnlineParty({
 
   const createPeerRoom = async () => {
     clearConnectionTimeout();
+    kickedPlayersRef.current.clear();
     setRoomError("");
     setConnectionStatus("방을 준비하고 있습니다.");
     setPhase("connecting");
@@ -3470,6 +3473,9 @@ function OnlineParty({
           : "이미 게임이 진행 중입니다.",
       );
       setPhase("entry");
+    }
+    if (packet.type === "kicked") {
+      leaveRoomRef.current("방장이 대기실에서 내보냈습니다.");
     }
   };
 
@@ -3655,7 +3661,7 @@ function OnlineParty({
   ) => {
     if (connectionAttemptRef.current !== attempt) return;
     if (departedId !== realtimeHostIdRef.current) {
-      if (roleRef.current === "host") handlePeerDeparture(departedId);
+      if (roleRef.current === "host") reconcilePlayerDeparture(departedId);
       return;
     }
 
@@ -3701,9 +3707,17 @@ function OnlineParty({
   ) => {
     if (connectionAttemptRef.current !== attempt) return;
     const timer = presenceDepartureTimersRef.current.get(playerId);
-    if (timer === undefined) return;
-    window.clearTimeout(timer);
-    presenceDepartureTimersRef.current.delete(playerId);
+    if (timer !== undefined) {
+      window.clearTimeout(timer);
+      presenceDepartureTimersRef.current.delete(playerId);
+    }
+    const reconnected = playersRef.current.map((player) =>
+      player.id === playerId ? { ...player, connected: true } : player,
+    );
+    if (reconnected.some((player) => player.id === playerId)) {
+      if (roleRef.current === "host") publishRoster(reconnected);
+      else replacePlayers(reconnected);
+    }
   };
 
   const scheduleRealtimePresenceLeave = (
@@ -3712,6 +3726,13 @@ function OnlineParty({
   ) => {
     const existing = presenceDepartureTimersRef.current.get(playerId);
     if (existing !== undefined) window.clearTimeout(existing);
+    const reconnecting = playersRef.current.map((player) =>
+      player.id === playerId ? { ...player, connected: false } : player,
+    );
+    if (reconnecting.some((player) => player.id === playerId)) {
+      if (roleRef.current === "host") publishRoster(reconnecting);
+      else replacePlayers(reconnecting);
+    }
     const graceMs = phaseRef.current === "lobby" ? 20000 : 8000;
     const timer = window.setTimeout(() => {
       presenceDepartureTimersRef.current.delete(playerId);
@@ -3723,6 +3744,7 @@ function OnlineParty({
   const createRealtimeRoom = async () => {
     if (!supabase) return createPeerRoom();
     clearConnectionTimeout();
+    kickedPlayersRef.current.clear();
     removeRealtimeChannel();
     setRoomError("");
     setConnectionStatus("Supabase 실시간 방을 준비하고 있습니다.");
@@ -4208,7 +4230,54 @@ function OnlineParty({
     }
   };
 
-  const leaveRoom = () => {
+  const kickPlayer = (playerId: string) => {
+    if (
+      roleRef.current !== "host" ||
+      playerId === localIdRef.current ||
+      !playersRef.current.some((player) => player.id === playerId)
+    ) {
+      return;
+    }
+    kickedPlayersRef.current.add(playerId);
+    const departureTimer = presenceDepartureTimersRef.current.get(playerId);
+    if (departureTimer !== undefined) {
+      window.clearTimeout(departureTimer);
+      presenceDepartureTimersRef.current.delete(playerId);
+    }
+    const connection = connectionsRef.current.get(playerId);
+    if (realtimeChannelRef.current) {
+      sendRealtimePacket({ type: "kicked" }, playerId);
+    } else if (connection?.open) {
+      connection.send({ type: "kicked" } satisfies RoomPacket);
+    }
+    connectionsRef.current.delete(playerId);
+    removeRealtimeSnapshotHostChannel(playerId);
+    const next =
+      phaseRef.current === "lobby"
+        ? playersRef.current.filter((player) => player.id !== playerId)
+        : playersRef.current.map((player) =>
+            player.id === playerId
+              ? {
+                  ...player,
+                  connected: false,
+                  alive: false,
+                  eliminatedAt: player.eliminatedAt ?? Date.now(),
+                }
+              : player,
+          );
+    publishRoster(next);
+    if (phaseRef.current !== "lobby") concludeIfNeeded(next);
+    if (connection) window.setTimeout(() => connection.close(), 80);
+  };
+
+  const leaveRoom = (reason = "") => {
+    if (roleRef.current === "guest") {
+      if (realtimeChannelRef.current) {
+        sendRealtimePacket({ type: "leave" });
+      } else if (hostConnectionRef.current?.open) {
+        hostConnectionRef.current.send({ type: "leave" } satisfies RoomPacket);
+      }
+    }
     clearConnectionTimeout();
     clearCountdown();
     clearResultReveal();
@@ -4249,11 +4318,17 @@ function OnlineParty({
     setPlayerItemEffects({});
     manualTargetsRef.current.clear();
     itemUsesRef.current.clear();
+    kickedPlayersRef.current.clear();
     chatMessagesRef.current = [];
     setChatMessages([]);
     setChatText("");
+    setRoomError(reason);
     setPhase("entry");
   };
+
+  useEffect(() => {
+    leaveRoomRef.current = leaveRoom;
+  });
 
   useEffect(
     () => () => {
@@ -4520,7 +4595,7 @@ function OnlineParty({
               <span className="eyebrow">WAITING ROOM</span>
               <h2>{players.length} / 8 PLAYERS</h2>
             </div>
-            <button className="leave-room" onClick={leaveRoom}>
+            <button className="leave-room" onClick={() => leaveRoom()}>
               LEAVE
             </button>
           </div>
@@ -4528,16 +4603,34 @@ function OnlineParty({
             {Array.from({ length: 8 }, (_, index) => {
               const player = players.find((item) => item.slot === index);
               return (
-                <div className={`lobby-slot ${player ? "slot-filled" : ""}`} key={index}>
+                <div
+                  className={`lobby-slot ${player ? "slot-filled" : ""} ${
+                    player && !player.connected ? "slot-reconnecting" : ""
+                  }`}
+                  key={index}
+                >
                   <span>P{index + 1}</span>
                   <strong>{player?.name ?? "OPEN SLOT"}</strong>
                   <em>
                     {player
                       ? player.id === hostId
                         ? "HOST"
-                        : "CONNECTED"
+                        : player.connected
+                          ? "CONNECTED"
+                          : "RECONNECTING"
                       : "WAITING"}
                   </em>
+                  {role === "host" &&
+                    player &&
+                    player.id !== localId && (
+                      <button
+                        className="kick-player"
+                        onClick={() => kickPlayer(player.id)}
+                        aria-label={`${player.name} 내보내기`}
+                      >
+                        KICK
+                      </button>
+                    )}
                 </div>
               );
             })}
@@ -4576,9 +4669,11 @@ function OnlineParty({
             <button
               className="start-online"
               onClick={startMatch}
-              disabled={players.length < 2}
+              disabled={players.filter((player) => player.connected).length < 2}
             >
-              {players.length < 2 ? "한 명 이상 기다리는 중…" : "START MATCH →"}
+              {players.filter((player) => player.connected).length < 2
+                ? "한 명 이상 기다리는 중…"
+                : "START MATCH →"}
             </button>
           ) : (
             <div className="guest-waiting">호스트가 게임을 시작하기를 기다리는 중…</div>
@@ -4606,7 +4701,7 @@ function OnlineParty({
             {survivors} / {players.length}
           </strong>
         </div>
-        <button onClick={leaveRoom}>LEAVE</button>
+        <button onClick={() => leaveRoom()}>LEAVE</button>
       </div>
       <div className="attack-feed" aria-live="polite">
         {attackLogs.map((log) => (
@@ -4965,7 +5060,7 @@ function OnlineParty({
               <button className="return-lobby" onClick={returnToLobby}>
                 RETURN TO LOBBY
               </button>
-              <button className="leave-room" onClick={leaveRoom}>
+              <button className="leave-room" onClick={() => leaveRoom()}>
                 LEAVE ROOM
               </button>
             </div>
@@ -5064,7 +5159,11 @@ function RulesPanel({
                 setRules({ ...rules, gravity: Number(event.target.value) })
               }
             />
-            <small>10줄을 지울 때마다 55ms 빨라지며, 최소 90ms입니다.</small>
+            <small>
+              {multiplayer
+                ? "경기 중 20초마다 70ms, 10줄마다 55ms 빨라지며 최소 70ms입니다."
+                : "10줄을 지울 때마다 55ms 빨라지며, 최소 90ms입니다."}
+            </small>
           </label>
           <label>
             <span>
@@ -5674,10 +5773,17 @@ export default function GameClient() {
       }
     }
     setMultiplayerPlaying(false);
-    if (nextScreen === "versus" && rules.targetMode !== "cycle") {
+    if (
+      nextScreen === "versus" &&
+      (rules.targetMode !== "cycle" ||
+        rules.itemsEnabled ||
+        rules.gravity !== MULTIPLAYER_DEFAULT_GRAVITY_MS)
+    ) {
       setRules({
         ...rules,
         targetMode: "cycle",
+        itemsEnabled: false,
+        gravity: MULTIPLAYER_DEFAULT_GRAVITY_MS,
       });
     }
     if (nextScreen !== "versus") {
