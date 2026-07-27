@@ -151,8 +151,8 @@ type RoomPacket =
       players: RoomPlayer[];
       rules: Rules;
     }
-  | { type: "attack"; amount: number }
-  | { type: "garbage"; id: number; amount: number }
+  | { type: "attack"; amount: number; comboChain?: number }
+  | { type: "garbage"; id: number; amount: number; comboChain?: number }
   | { type: "target-select"; targetId: string }
   | { type: "item-use"; item: ItemType; targetId: string }
   | { type: "ink"; id: number }
@@ -420,6 +420,15 @@ function collides(board: Board, piece: Piece): boolean {
   );
 }
 
+function samePiece(left: Piece, right: Piece): boolean {
+  return (
+    left.type === right.type &&
+    left.rotation === right.rotation &&
+    left.x === right.x &&
+    left.y === right.y
+  );
+}
+
 function occupiedCorner(board: Board, x: number, y: number) {
   return (
     x < 0 ||
@@ -547,6 +556,31 @@ function startingItemInventory(rules: Rules, seed?: number): ItemType[] {
   return inventory;
 }
 
+function garbageHolePattern(
+  amount: number,
+  comboChain: number,
+  seed: number,
+): number[] {
+  const safeAmount = Math.max(0, Math.round(amount));
+  if (!safeAmount) return [];
+  const bandSize =
+    comboChain >= 7
+      ? 1
+      : comboChain >= 5
+        ? 2
+        : comboChain >= 3
+          ? Math.max(2, Math.ceil(safeAmount / 2))
+          : safeAmount;
+  let hole = Math.abs(seed) % WIDTH;
+  return Array.from({ length: safeAmount }, (_, row) => {
+    if (row > 0 && row % bandSize === 0) {
+      const shift = 2 + ((Math.abs(seed) + row + comboChain) % (WIDTH - 3));
+      hole = (hole + shift) % WIDTH;
+    }
+    return hole;
+  });
+}
+
 function starHoleCells(board: Board): Array<[number, number]> {
   const firstOccupied = board.findIndex((row) => row.some(Boolean));
   const centerY =
@@ -617,14 +651,14 @@ type BoardProps = {
   pieceSeed?: number;
   sharedStartAt?: number;
   compact?: boolean;
-  garbage?: { id: number; amount: number };
+  garbage?: { id: number; amount: number; comboChain?: number };
   pendingGarbage?: number;
   pendingGarbageDeadline?: number;
   ink?: { id: number };
   itemEffect?: { id: number; item: Exclude<ItemType, "ink"> };
   matchOutcome?: "won" | "lost" | null;
   mobileControlLayout?: MobileControlLayout;
-  onAttack?: (amount: number) => void;
+  onAttack?: (amount: number, comboChain: number) => void;
   onItemPickup?: (item: ItemType) => void;
   onFinish?: (status: "won" | "lost", reason?: FinishReason) => void;
   onSnapshot?: (snapshot: GameSnapshot) => void;
@@ -718,6 +752,7 @@ function GameBoard({
   const lockDeadlineRef = useRef<number | null>(null);
   const groundedLimitRef = useRef<number | null>(null);
   const lockResetCount = useRef(0);
+  const pieceGenerationRef = useRef(0);
   const lastActionWasRotation = useRef(false);
   const lastRotationKickIndex = useRef(-1);
   const lastGarbageAtRef = useRef(0);
@@ -782,9 +817,22 @@ function GameBoard({
   );
 
   const lockPiece = useCallback(
-    (piece: Piece) => {
+    (
+      piece: Piece,
+      force = false,
+      expectedGeneration = pieceGenerationRef.current,
+    ) => {
+      const currentBoard = boardRef.current;
+      if (
+        !force &&
+        (expectedGeneration !== pieceGenerationRef.current ||
+          !samePiece(activeRef.current, piece) ||
+          !collides(currentBoard, { ...piece, y: piece.y + 1 }))
+      ) {
+        return;
+      }
       const tSpinKind = detectTSpin(
-        board,
+        currentBoard,
         piece,
         lastActionWasRotation.current,
         lastRotationKickIndex.current,
@@ -794,7 +842,7 @@ function GameBoard({
       lockResetCount.current = 0;
       lastActionWasRotation.current = false;
       lastRotationKickIndex.current = -1;
-      const merged = board.map((row) => [...row]);
+      const merged = currentBoard.map((row) => [...row]);
       let overflow = false;
       pieceCells(piece).forEach(([x, y]) => {
         if (y < 0) overflow = true;
@@ -851,6 +899,7 @@ function GameBoard({
         replenished[0],
       );
       const nextPiece = availableNextPiece ?? spawn(replenished[0]);
+      pieceGenerationRef.current += 1;
       const nextLines = lines + cleared;
       const nextCombo = cleared ? combo + 1 : -1;
       const baseScores = [0, 100, 300, 500, 800];
@@ -931,7 +980,7 @@ function GameBoard({
             1050,
           );
         }
-        if (attack > 0) onAttack?.(attack);
+        if (attack > 0) onAttack?.(attack, nextCombo + 1);
         const tSpinNames = ["T-SPIN!", "T-SPIN SINGLE!", "T-SPIN DOUBLE!", "T-SPIN TRIPLE!"];
         const miniTSpinNames = [
           "T-SPIN MINI!",
@@ -963,7 +1012,6 @@ function GameBoard({
       }
     },
     [
-      board,
       boardItems,
       combo,
       activeItem,
@@ -1031,8 +1079,6 @@ function GameBoard({
     const grounded = collides(board, { ...active, y: active.y + 1 });
     if (!grounded) {
       lockDeadlineRef.current = null;
-      groundedLimitRef.current = null;
-      lockResetCount.current = 0;
       return;
     }
     const now = window.performance.now();
@@ -1050,7 +1096,11 @@ function GameBoard({
       0,
       Math.min(lockDeadlineRef.current, groundedLimitRef.current) - now,
     );
-    const timer = window.setTimeout(() => lockPiece(active), remaining);
+    const expectedGeneration = pieceGenerationRef.current;
+    const timer = window.setTimeout(
+      () => lockPiece(active, false, expectedGeneration),
+      remaining,
+    );
     return () => window.clearTimeout(timer);
   }, [active, board, lockPiece, status]);
 
@@ -1111,13 +1161,18 @@ function GameBoard({
       // earlier garbage amount.
       garbageAppliedTotalRef.current = garbage.amount;
       const amount = Math.min(pendingAmount, VISIBLE_HEIGHT);
-      const hole = Math.floor(Math.random() * WIDTH);
+      const holes = garbageHolePattern(
+        amount,
+        garbage.comboChain ?? 0,
+        garbage.id,
+      );
       const currentBoard = boardRef.current;
       const overflowedRows = currentBoard
         .slice(0, amount)
         .some((row) => row.some(Boolean));
       const shifted = currentBoard.slice(amount);
       for (let row = 0; row < amount; row += 1) {
+        const hole = holes[row];
         shifted.push(
           Array.from({ length: WIDTH }, (_, x) => (x === hole ? null : "G")),
         );
@@ -1294,7 +1349,6 @@ function GameBoard({
   }, []);
 
   const hardDrop = useCallback(() => {
-    clearRepeatHandles();
     inputBlockedUntilRef.current = window.performance.now() + 75;
     let dropped = { ...active };
     let distance = 0;
@@ -1326,14 +1380,15 @@ function GameBoard({
         ),
       360,
     );
-    lockPiece(dropped);
-  }, [active, board, clearRepeatHandles, lockPiece]);
+    lockPiece(dropped, true);
+  }, [active, board, lockPiece]);
 
   const holdPiece = useCallback(() => {
     if (!canHold) return;
     lockDeadlineRef.current = null;
     groundedLimitRef.current = null;
     lockResetCount.current = 0;
+    pieceGenerationRef.current += 1;
     lastActionWasRotation.current = false;
     lastRotationKickIndex.current = -1;
     if (held) {
@@ -2411,7 +2466,11 @@ function OnlineParty({
     useState<FinishReason>("topout");
   const [matchId, setMatchId] = useState(0);
   const [matchRules, setMatchRules] = useState(rules);
-  const [garbageSignal, setGarbageSignal] = useState({ id: 0, amount: 0 });
+  const [garbageSignal, setGarbageSignal] = useState({
+    id: 0,
+    amount: 0,
+    comboChain: 0,
+  });
   const [pendingGarbage, setPendingGarbage] = useState(0);
   const [pendingGarbageDeadline, setPendingGarbageDeadline] = useState(0);
   const [inkSignal, setInkSignal] = useState({ id: 0 });
@@ -2468,6 +2527,7 @@ function OnlineParty({
   const garbageQueueTimerRef = useRef<number | null>(null);
   const itemLaunchTimerRef = useRef<number | null>(null);
   const pendingGarbageRef = useRef(0);
+  const pendingGarbageComboRef = useRef(0);
   const activeMatchIdRef = useRef(0);
   const resultMatchIdRef = useRef(0);
   const targetCursor = useRef(0);
@@ -2596,11 +2656,14 @@ function OnlineParty({
     clearGarbageQueueTimer();
     const amount = pendingGarbageRef.current;
     if (!amount || phaseRef.current !== "playing") return;
+    const comboChain = pendingGarbageComboRef.current;
     setPendingGarbageDeadline(0);
     replacePendingGarbage(0);
+    pendingGarbageComboRef.current = 0;
     setGarbageSignal((current) => ({
       id: current.id + 1,
       amount: current.amount + amount,
+      comboChain,
     }));
   };
 
@@ -2614,6 +2677,7 @@ function OnlineParty({
     clearItemLaunchTimer();
     setPendingGarbageDeadline(0);
     replacePendingGarbage(0);
+    pendingGarbageComboRef.current = 0;
     setItemLaunchEffect(null);
     setWinnerId(nextWinnerId);
     setWinnerName(nextWinnerName);
@@ -2655,7 +2719,7 @@ function OnlineParty({
     setPlayers(next);
   };
 
-  const enqueueGarbage = (amount: number) => {
+  const enqueueGarbage = (amount: number, comboChain = 0) => {
     if (
       phaseRef.current !== "playing" ||
       !Number.isFinite(amount) ||
@@ -2664,6 +2728,10 @@ function OnlineParty({
       return;
     }
     replacePendingGarbage(pendingGarbageRef.current + Math.round(amount));
+    pendingGarbageComboRef.current = Math.max(
+      pendingGarbageComboRef.current,
+      Math.max(0, Math.round(comboChain)),
+    );
     clearGarbageQueueTimer();
     setPendingGarbageDeadline(Date.now() + GARBAGE_QUEUE_DELAY_MS);
     garbageQueueTimerRef.current = window.setTimeout(
@@ -2680,6 +2748,7 @@ function OnlineParty({
     if (!pendingGarbageRef.current) {
       clearGarbageQueueTimer();
       setPendingGarbageDeadline(0);
+      pendingGarbageComboRef.current = 0;
     }
     return outgoing - canceled;
   };
@@ -3012,7 +3081,11 @@ function OnlineParty({
     replacePlayers(next);
   };
 
-  const routeAttack = (fromId: string, amount: number) => {
+  const routeAttack = (
+    fromId: string,
+    amount: number,
+    comboChain = 0,
+  ) => {
     const opponents = playersRef.current.filter(
       (player) =>
         player.id !== fromId && player.alive && player.connected,
@@ -3042,9 +3115,10 @@ function OnlineParty({
         type: "garbage",
         id: Date.now() + targetCursor.current + index,
         amount,
+        comboChain,
       };
       if (target.id === localIdRef.current) {
-        enqueueGarbage(amount);
+        enqueueGarbage(amount, comboChain);
       } else if (realtimeChannelRef.current) {
         sendRealtimePacket(packet, target.id);
       } else {
@@ -3256,7 +3330,7 @@ function OnlineParty({
       routeItem(senderId, packet.targetId, packet.item);
     }
     if (packet.type === "attack") {
-      routeAttack(senderId, packet.amount);
+      routeAttack(senderId, packet.amount, packet.comboChain);
     }
     if (packet.type === "snapshot") {
       if (realtimeChannelRef.current) {
@@ -3450,7 +3524,8 @@ function OnlineParty({
       clearGarbageQueueTimer();
       setPendingGarbageDeadline(0);
       replacePendingGarbage(0);
-      setGarbageSignal({ id: 0, amount: 0 });
+      pendingGarbageComboRef.current = 0;
+      setGarbageSignal({ id: 0, amount: 0, comboChain: 0 });
       setInkSignal({ id: 0 });
       setItemEffectSignal(null);
       setInkedPlayers({});
@@ -3477,7 +3552,7 @@ function OnlineParty({
       replacePlayers(next);
     }
     if (packet.type === "garbage") {
-      enqueueGarbage(packet.amount);
+      enqueueGarbage(packet.amount, packet.comboChain);
     }
     if (packet.type === "ink") {
       setInkSignal({ id: packet.id });
@@ -3503,7 +3578,8 @@ function OnlineParty({
       clearGarbageQueueTimer();
       setPendingGarbageDeadline(0);
       replacePendingGarbage(0);
-      setGarbageSignal({ id: 0, amount: 0 });
+      pendingGarbageComboRef.current = 0;
+      setGarbageSignal({ id: 0, amount: 0, comboChain: 0 });
       replacePlayers(packet.players);
       rulesRef.current = packet.rules;
       setMatchRules(packet.rules);
@@ -4006,8 +4082,9 @@ function OnlineParty({
     clearItemLaunchTimer();
     setPendingGarbageDeadline(0);
     replacePendingGarbage(0);
+    pendingGarbageComboRef.current = 0;
     setItemLaunchEffect(null);
-    setGarbageSignal({ id: 0, amount: 0 });
+    setGarbageSignal({ id: 0, amount: 0, comboChain: 0 });
     setInkSignal({ id: 0 });
     setItemEffectSignal(null);
     setInkedPlayers({});
@@ -4099,8 +4176,9 @@ function OnlineParty({
     clearItemLaunchTimer();
     setPendingGarbageDeadline(0);
     replacePendingGarbage(0);
+    pendingGarbageComboRef.current = 0;
     setItemLaunchEffect(null);
-    setGarbageSignal({ id: 0, amount: 0 });
+    setGarbageSignal({ id: 0, amount: 0, comboChain: 0 });
     broadcast({
       type: "start",
       matchId: nextMatchId,
@@ -4148,17 +4226,18 @@ function OnlineParty({
     }
   };
 
-  const sendAttack = (amount: number) => {
+  const sendAttack = (amount: number, comboChain: number) => {
     const outgoing = cancelPendingGarbage(amount);
     if (outgoing <= 0) return;
     if (roleRef.current === "host") {
-      routeAttack(localIdRef.current, outgoing);
+      routeAttack(localIdRef.current, outgoing, comboChain);
     } else if (realtimeChannelRef.current) {
-      sendRealtimePacket({ type: "attack", amount: outgoing });
+      sendRealtimePacket({ type: "attack", amount: outgoing, comboChain });
     } else if (hostConnectionRef.current?.open) {
       hostConnectionRef.current.send({
         type: "attack",
         amount: outgoing,
+        comboChain,
       } satisfies RoomPacket);
     }
   };
@@ -4348,8 +4427,9 @@ function OnlineParty({
     clearItemLaunchTimer();
     setPendingGarbageDeadline(0);
     replacePendingGarbage(0);
+    pendingGarbageComboRef.current = 0;
     setItemLaunchEffect(null);
-    setGarbageSignal({ id: 0, amount: 0 });
+    setGarbageSignal({ id: 0, amount: 0, comboChain: 0 });
     connectionAttemptRef.current += 1;
     removeRealtimeChannel();
     connectionsRef.current.forEach((connection) => connection.close());

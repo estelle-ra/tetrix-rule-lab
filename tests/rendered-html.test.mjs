@@ -293,6 +293,24 @@ test("ships without starter-only assets", async () => {
   assert.match(gameClient, /const HEIGHT = VISIBLE_HEIGHT \+ BUFFER_ROWS/);
   assert.match(gameClient, /const RESCUE_LOCK_DELAY_MS = 700/);
   assert.match(gameClient, /const MAX_RESCUE_GROUNDED_MS = 2400/);
+  assert.match(gameClient, /function samePiece\(left: Piece, right: Piece\)/);
+  assert.match(gameClient, /const pieceGenerationRef = useRef\(0\)/);
+  assert.match(
+    gameClient,
+    /expectedGeneration !== pieceGenerationRef\.current[\s\S]*!samePiece\(activeRef\.current, piece\)/,
+  );
+  assert.match(
+    gameClient,
+    /if \(!grounded\) \{\s*lockDeadlineRef\.current = null;\s*return;/,
+  );
+  assert.doesNotMatch(
+    gameClient,
+    /if \(!grounded\) \{[\s\S]{0,160}groundedLimitRef\.current = null/,
+  );
+  assert.doesNotMatch(
+    gameClient,
+    /const hardDrop = useCallback\(\(\) => \{\s*clearRepeatHandles\(\)/,
+  );
   assert.match(
     gameClient,
     /const rescueActive = pieceCells\(active\)\.some\(\(\[, y\]\) => y < BUFFER_ROWS\)/,
@@ -329,6 +347,13 @@ test("ships without starter-only assets", async () => {
   assert.match(gameClient, /\{ length: VISIBLE_HEIGHT \* WIDTH \}/);
   assert.match(gameClient, /const enqueueGarbage/);
   assert.match(gameClient, /const cancelPendingGarbage/);
+  assert.match(gameClient, /function garbageHolePattern\(/);
+  assert.match(gameClient, /comboChain >= 7/);
+  assert.match(gameClient, /comboChain >= 5/);
+  assert.match(gameClient, /comboChain >= 3/);
+  assert.match(gameClient, /onAttack\?\.\(attack, nextCombo \+ 1\)/);
+  assert.match(gameClient, /type: "attack"; amount: number; comboChain\?: number/);
+  assert.match(gameClient, /type: "garbage"; id: number; amount: number; comboChain\?: number/);
   assert.match(gameClient, /\| \{ type: "kicked" \}/);
   assert.match(gameClient, /const kickPlayer = \(playerId: string\)/);
   assert.match(gameClient, /className="kick-player"/);
