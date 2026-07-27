@@ -319,7 +319,7 @@ test("ships without starter-only assets", async () => {
   assert.match(gameClient, /VERSUS_SPEED_STEP_SECONDS = 20/);
   assert.match(gameClient, /VERSUS_SPEED_STEP_MS = 70/);
   assert.match(gameClient, /VERSUS_MIN_GRAVITY_MS = 70/);
-  assert.match(gameClient, /MULTIPLAYER_DEFAULT_GRAVITY_MS = 720/);
+  assert.doesNotMatch(gameClient, /MULTIPLAYER_DEFAULT_GRAVITY_MS/);
   assert.match(gameClient, /GRAVITY_HEARTBEAT_MS = 32/);
   assert.match(gameClient, /stepDownRef\.current\(\)/);
   assert.doesNotMatch(
@@ -359,10 +359,14 @@ test("ships without starter-only assets", async () => {
   assert.match(gameClient, /className="kick-player"/);
   assert.match(gameClient, /"RECONNECTING"/);
   assert.match(gameClient, /sendRealtimePacket\(\{ type: "leave" \}\)/);
-  assert.match(
+  assert.match(gameClient, /targetMode: "cycle",\s*itemsEnabled: false,/);
+  assert.doesNotMatch(
     gameClient,
-    /itemsEnabled: false,\s*gravity: MULTIPLAYER_DEFAULT_GRAVITY_MS/,
+    /nextScreen === "versus"[\s\S]{0,300}gravity:/,
   );
+  assert.match(gameClient, /1000 \/ rules\.gravity/);
+  assert.match(gameClient, /숫자가 작을수록 빠름/);
+  assert.match(gameClient, /방장이 정한 속도가 다음 경기부터 모두에게 적용됩니다/);
   assert.match(gameClient, /pendingGarbage=\{pendingGarbage\}/);
   assert.match(
     gameClient,
@@ -448,6 +452,7 @@ test("ships without starter-only assets", async () => {
   assert.match(globalCss, /\.item-inventory/);
   assert.match(globalCss, /\.item-cell/);
   assert.match(globalCss, /\.board-item-status/);
+  assert.match(globalCss, /\.gravity-guide/);
   assert.match(globalCss, /\.mobile-inventory-fire/);
   assert.doesNotMatch(globalCss, /\.mobile-item-action/);
   assert.match(globalCss, /\.piece-W/);

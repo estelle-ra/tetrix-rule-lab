@@ -236,7 +236,6 @@ const SPIN_EFFECT_MS = 5000;
 const VERSUS_SPEED_STEP_SECONDS = 20;
 const VERSUS_SPEED_STEP_MS = 70;
 const VERSUS_MIN_GRAVITY_MS = 70;
-const MULTIPLAYER_DEFAULT_GRAVITY_MS = 720;
 const GRAVITY_HEARTBEAT_MS = 32;
 const GARBAGE_QUEUE_DELAY_MS = 3500;
 const MAX_GARBAGE_QUEUE = 40;
@@ -5295,7 +5294,9 @@ function RulesPanel({
           <label>
             <span>
               <strong>낙하 속도</strong>
-              <em>{rules.gravity}ms</em>
+              <em>
+                {rules.gravity}ms · 약 {(1000 / rules.gravity).toFixed(1)}칸/초
+              </em>
             </span>
             <input
               type="range"
@@ -5307,9 +5308,17 @@ function RulesPanel({
                 setRules({ ...rules, gravity: Number(event.target.value) })
               }
             />
+            <div
+              className="gravity-guide"
+              aria-label="낙하 속도는 숫자가 작을수록 빠릅니다"
+            >
+              <strong>빠름</strong>
+              <span>120ms ← 숫자가 작을수록 빠름 → 1200ms</span>
+              <strong>느림</strong>
+            </div>
             <small>
               {multiplayer
-                ? "경기 중 20초마다 70ms, 10줄마다 55ms 빨라지며 최소 70ms입니다."
+                ? "방장이 정한 속도가 다음 경기부터 모두에게 적용됩니다. 경기 중 20초마다 70ms, 10줄마다 55ms 빨라지며 최소 70ms입니다."
                 : "10줄을 지울 때마다 55ms 빨라지며, 최소 90ms입니다."}
             </small>
           </label>
@@ -5923,15 +5932,12 @@ export default function GameClient() {
     setMultiplayerPlaying(false);
     if (
       nextScreen === "versus" &&
-      (rules.targetMode !== "cycle" ||
-        rules.itemsEnabled ||
-        rules.gravity !== MULTIPLAYER_DEFAULT_GRAVITY_MS)
+      (rules.targetMode !== "cycle" || rules.itemsEnabled)
     ) {
       setRules({
         ...rules,
         targetMode: "cycle",
         itemsEnabled: false,
-        gravity: MULTIPLAYER_DEFAULT_GRAVITY_MS,
       });
     }
     if (nextScreen !== "versus") {
