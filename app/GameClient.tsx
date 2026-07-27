@@ -696,6 +696,8 @@ function GameBoard({
     y: number;
     piece: PieceName;
   } | null>(null);
+  const [endReason, setEndReason] = useState<FinishReason>("topout");
+  const [deathEffectId, setDeathEffectId] = useState(0);
   const [windowFocused, setWindowFocused] = useState(true);
   const [joystickVector, setJoystickVector] = useState({ x: 0, y: 0 });
   const [joystickOrigin, setJoystickOrigin] = useState({ x: 0, y: 0 });
@@ -766,11 +768,15 @@ function GameBoard({
 
   const finish = useCallback(
     (nextStatus: "won" | "lost", reason?: FinishReason) => {
-      setStatus(nextStatus);
-      if (!finishSent.current) {
-        finishSent.current = true;
-        onFinish?.(nextStatus, reason);
+      if (finishSent.current) return;
+      finishSent.current = true;
+      if (nextStatus === "lost") {
+        setEndReason(reason ?? "topout");
+        setDeathEffectId(Date.now());
+        navigator.vibrate?.([80, 50, 130, 70, 220]);
       }
+      setStatus(nextStatus);
+      onFinish?.(nextStatus, reason);
     },
     [onFinish],
   );
@@ -1720,7 +1726,7 @@ function GameBoard({
         <div
           className={`board-shell ${impactEffect ? "board-impact" : ""} ${
             bufferDanger ? "board-danger" : ""
-          }`}
+          } ${status === "lost" ? "board-topout" : ""}`}
         >
           {mode === "versus" && (
             <div
@@ -1909,8 +1915,42 @@ function GameBoard({
               {spinLocked ? "NO SPIN" : "SPEED UP"}
             </div>
           )}
-          {status !== "playing" && !(mode === "versus" && matchOutcome) && (
-            <div className="board-overlay">
+          {status === "lost" && (
+            <div
+              aria-hidden="true"
+              className="death-effect"
+              key={deathEffectId}
+            >
+              <span className="death-shockwave" />
+              <span className="death-scanline" />
+              {Array.from({ length: 22 }, (_, index) => {
+                const angle = ((index * 137.5 + 18) * Math.PI) / 180;
+                const distance = 68 + (index % 7) * 18;
+                return (
+                  <i
+                    className={`death-fragment fragment-${index % 3}`}
+                    key={index}
+                    style={
+                      {
+                        "--death-x": `${Math.cos(angle) * distance}px`,
+                        "--death-y": `${Math.sin(angle) * distance}px`,
+                        "--death-delay": `${(index % 6) * 18}ms`,
+                      } as CSSProperties
+                    }
+                  />
+                );
+              })}
+            </div>
+          )}
+          {status !== "playing" &&
+            (!(mode === "versus" && matchOutcome) || status === "lost") && (
+            <div
+              aria-live={status === "lost" ? "assertive" : "polite"}
+              className={`board-overlay ${
+                status === "lost" ? "board-overlay-lost" : ""
+              }`}
+              role={status === "lost" ? "alert" : "status"}
+            >
               <strong>
                 {status === "paused"
                   ? "PAUSED"
@@ -1920,6 +1960,13 @@ function GameBoard({
                       ? "TIME!"
                       : "CLEAR!"}
               </strong>
+              {status === "lost" && (
+                <em>
+                  {endReason === "garbage"
+                    ? "GARBAGE OVERLOAD"
+                    : "SPAWN ZONE BLOCKED"}
+                </em>
+              )}
               <span>
                 {status === "paused" ? "ESC로 계속" : `${lines} lines · ${score} pts`}
               </span>

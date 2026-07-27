@@ -345,6 +345,13 @@ test("ships without starter-only assets", async () => {
   );
   assert.match(gameClient, /className=\{`garbage-meter/);
   assert.match(gameClient, /className="combo-attack-effect"/);
+  assert.match(
+    gameClient,
+    /navigator\.vibrate\?\.\(\[80, 50, 130, 70, 220\]\)/,
+  );
+  assert.match(gameClient, /className="death-effect"/);
+  assert.match(gameClient, /SPAWN ZONE BLOCKED/);
+  assert.match(gameClient, /GARBAGE OVERLOAD/);
   assert.match(gameClient, /className=\{`item-launch-effect/);
   assert.match(gameClient, /rules=\{\{ \.\.\.rules, itemsEnabled: false \}\}/);
   assert.match(gameClient, /garbageAppliedTotalRef/);
@@ -391,6 +398,10 @@ test("ships without starter-only assets", async () => {
   assert.match(globalCss, /\.slot-reconnecting/);
   assert.match(globalCss, /\.kick-player/);
   assert.match(globalCss, /\.board-danger/);
+  assert.match(globalCss, /\.board-topout/);
+  assert.match(globalCss, /\.board-overlay-lost/);
+  assert.match(globalCss, /@keyframes topout-board-hit/);
+  assert.match(globalCss, /@keyframes topout-fragment/);
   assert.match(globalCss, /\.combo-attack-effect/);
   assert.match(globalCss, /\.item-launch-effect/);
   assert.match(globalCss, /\.buffer-zone-danger/);
