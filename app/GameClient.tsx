@@ -1951,6 +1951,7 @@ function GameBoard({
               }`}
               role={status === "lost" ? "alert" : "status"}
             >
+              {status === "lost" && <b>탈락</b>}
               <strong>
                 {status === "paused"
                   ? "PAUSED"
@@ -1963,8 +1964,8 @@ function GameBoard({
               {status === "lost" && (
                 <em>
                   {endReason === "garbage"
-                    ? "GARBAGE OVERLOAD"
-                    : "SPAWN ZONE BLOCKED"}
+                    ? "공격 블록이 한계선을 넘었습니다"
+                    : "새 블록이 들어올 공간이 없습니다"}
                 </em>
               )}
               <span>
@@ -4421,8 +4422,8 @@ function OnlineParty({
   const matchEndDetail = localWon
     ? "LAST PLAYER STANDING"
     : localEndReason === "garbage"
-      ? "TOP OUT · GARBAGE PRESSURE"
-      : "TOP OUT · STACK REACHED THE CEILING";
+      ? "공격 블록이 한계선을 넘어 탈락했습니다"
+      : "새 블록이 들어올 공간이 없어 탈락했습니다";
   const isSpectating = Boolean(
     localPlayer && (!localPlayer.alive || localPlayer.spectating),
   );
@@ -5030,9 +5031,14 @@ function OnlineParty({
         </aside>
       </div>
       {phase === "ended" && !showResultCard && (
-        <div className="winner-reveal" aria-live="assertive">
-          <span>{localWon ? "YOU WIN" : "MATCH OVER"}</span>
-          <strong>{winnerName}</strong>
+        <div
+          className={`winner-reveal ${
+            localWon ? "winner-reveal-win" : "winner-reveal-loss"
+          }`}
+          aria-live="assertive"
+        >
+          <span>{localWon ? "YOU WIN" : "TOP OUT"}</span>
+          <strong>{localWon ? winnerName : "탈락"}</strong>
           <em>{matchEndDetail}</em>
         </div>
       )}

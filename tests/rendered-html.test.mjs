@@ -269,9 +269,9 @@ test("ships without starter-only assets", async () => {
     gameClient,
     /available === false[\s\S]*removeItem\("tetstar-identity-v1"\)/,
   );
-  assert.match(gameClient, /className="winner-reveal"/);
+  assert.match(gameClient, /className=\{`winner-reveal/);
   assert.match(gameClient, /showResultCard/);
-  assert.match(gameClient, /GARBAGE PRESSURE/);
+  assert.match(gameClient, /공격 블록이 한계선을 넘어 탈락했습니다/);
   assert.match(gameClient, /matchOutcome/);
   assert.match(gameClient, /개인 모바일 조작/);
   assert.match(gameClient, /changeMobileControlLayout/);
@@ -350,8 +350,9 @@ test("ships without starter-only assets", async () => {
     /navigator\.vibrate\?\.\(\[80, 50, 130, 70, 220\]\)/,
   );
   assert.match(gameClient, /className="death-effect"/);
-  assert.match(gameClient, /SPAWN ZONE BLOCKED/);
-  assert.match(gameClient, /GARBAGE OVERLOAD/);
+  assert.match(gameClient, /새 블록이 들어올 공간이 없습니다/);
+  assert.match(gameClient, /공격 블록이 한계선을 넘었습니다/);
+  assert.match(gameClient, /winner-reveal-loss/);
   assert.match(gameClient, /className=\{`item-launch-effect/);
   assert.match(gameClient, /rules=\{\{ \.\.\.rules, itemsEnabled: false \}\}/);
   assert.match(gameClient, /garbageAppliedTotalRef/);
@@ -400,6 +401,8 @@ test("ships without starter-only assets", async () => {
   assert.match(globalCss, /\.board-danger/);
   assert.match(globalCss, /\.board-topout/);
   assert.match(globalCss, /\.board-overlay-lost/);
+  assert.match(globalCss, /\.winner-reveal-loss/);
+  assert.match(globalCss, /brightness\(0\.72\)/);
   assert.match(globalCss, /@keyframes topout-board-hit/);
   assert.match(globalCss, /@keyframes topout-fragment/);
   assert.match(globalCss, /\.combo-attack-effect/);

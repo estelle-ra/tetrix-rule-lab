@@ -1245,9 +1245,17 @@ input:focus-visible {
 .board-overlay-lost {
   animation: topout-message-in 1.15s cubic-bezier(0.16, 1, 0.3, 1) both;
   background:
-    radial-gradient(circle at 50% 44%, rgba(117, 8, 5, 0.48), transparent 50%),
-    rgba(3, 4, 5, 0.68);
+    radial-gradient(circle at 50% 44%, rgba(151, 18, 10, 0.3), transparent 58%),
+    rgba(3, 4, 5, 0.24);
   z-index: 12;
+}
+
+.board-overlay-lost b {
+  color: #fff0ed;
+  font: 900 clamp(13px, 1.4vw, 18px) Pretendard, sans-serif;
+  letter-spacing: 0.22em;
+  margin-bottom: 12px;
+  text-shadow: 0 0 14px rgba(255, 63, 47, 0.65);
 }
 
 .board-overlay-lost strong {
@@ -1486,7 +1494,7 @@ input:focus-visible {
 
 @keyframes topout-board-dim {
   0%, 18% { filter: brightness(1.45) saturate(1.4); }
-  100% { filter: brightness(0.42) grayscale(0.62) saturate(0.5); }
+  100% { filter: brightness(0.72) grayscale(0.2) saturate(0.82); }
 }
 
 @keyframes topout-message-in {
@@ -3095,6 +3103,14 @@ button.online-choice:hover {
   z-index: 70;
 }
 
+.winner-reveal-loss {
+  background: radial-gradient(
+    circle at center,
+    rgba(167, 24, 14, 0.24),
+    transparent 64%
+  );
+}
+
 .winner-reveal span {
   color: var(--lime);
   font: 900 clamp(18px, 2.4vw, 32px) monospace;
@@ -3118,6 +3134,22 @@ button.online-choice:hover {
   color: rgba(213, 220, 229, 0.82);
   font: normal clamp(10px, 1.1vw, 14px) monospace;
   letter-spacing: 0.14em;
+}
+
+.winner-reveal-loss span {
+  color: #ff7869;
+  text-shadow: 0 0 18px rgba(255, 65, 50, 0.62);
+}
+
+.winner-reveal-loss strong {
+  color: #fff2ef;
+  text-shadow:
+    0 0 24px rgba(255, 47, 32, 0.52),
+    0 14px 32px rgba(0, 0, 0, 0.56);
+}
+
+.winner-reveal-loss em {
+  color: rgba(255, 221, 216, 0.92);
 }
 
 .result-end-reason {
