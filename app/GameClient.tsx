@@ -227,6 +227,7 @@ const SPIN_EFFECT_MS = 5000;
 const VERSUS_SPEED_STEP_SECONDS = 20;
 const VERSUS_SPEED_STEP_MS = 45;
 const VERSUS_MIN_GRAVITY_MS = 70;
+const GRAVITY_HEARTBEAT_MS = 32;
 const GARBAGE_QUEUE_DELAY_MS = 3500;
 const MAX_GARBAGE_QUEUE = 40;
 const MAX_ITEM_INVENTORY = 30;
@@ -983,29 +984,46 @@ function GameBoard({
     stepDownRef.current = stepDown;
   }, [stepDown]);
 
+  const versusSpeedSteps =
+    mode === "versus"
+      ? Math.floor(seconds / VERSUS_SPEED_STEP_SECONDS)
+      : 0;
+
   useEffect(() => {
     if (status !== "playing") return;
-    const versusSpeedSteps =
-      mode === "versus"
-        ? Math.floor(seconds / VERSUS_SPEED_STEP_SECONDS)
-        : 0;
+    const configuredGravity = Number.isFinite(rules.gravity)
+      ? rules.gravity
+      : DEFAULT_RULES.gravity;
     const normalGravity = Math.max(
       mode === "versus" ? VERSUS_MIN_GRAVITY_MS : 90,
-      rules.gravity -
+      configuredGravity -
         Math.floor(lines / 10) * 55 -
         versusSpeedSteps * VERSUS_SPEED_STEP_MS,
     );
-    const enteringFromBuffer = pieceCells(active).every(
-      ([, y]) => y < BUFFER_ROWS,
-    );
-    const gravity = enteringFromBuffer
-      ? 70
-      : speedActive
-        ? Math.max(55, normalGravity * 0.24)
-        : normalGravity;
-    const timer = window.setInterval(() => stepDownRef.current(), gravity);
+    let lastDropAt = window.performance.now();
+    const timer = window.setInterval(() => {
+      const now = window.performance.now();
+      const enteringFromBuffer = pieceCells(activeRef.current).every(
+        ([, y]) => y < BUFFER_ROWS,
+      );
+      const gravity = enteringFromBuffer
+        ? 70
+        : speedActive
+          ? Math.max(55, normalGravity * 0.24)
+          : normalGravity;
+      if (now - lastDropAt < gravity) return;
+      lastDropAt = now;
+      stepDownRef.current();
+    }, GRAVITY_HEARTBEAT_MS);
     return () => window.clearInterval(timer);
-  }, [active, lines, mode, rules.gravity, seconds, speedActive, status]);
+  }, [
+    lines,
+    mode,
+    rules.gravity,
+    speedActive,
+    status,
+    versusSpeedSteps,
+  ]);
 
   useEffect(() => {
     if (status !== "playing") return;
@@ -1612,12 +1630,7 @@ function GameBoard({
         .some((row) => row.some(Boolean)),
     [board],
   );
-  const displayLevel =
-    Math.floor(lines / 10) +
-    (mode === "versus"
-      ? Math.floor(seconds / VERSUS_SPEED_STEP_SECONDS)
-      : 0) +
-    1;
+  const displayLevel = Math.floor(lines / 10) + versusSpeedSteps + 1;
 
   useEffect(() => {
     onSnapshotRef.current = onSnapshot;

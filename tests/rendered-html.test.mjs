@@ -289,6 +289,12 @@ test("ships without starter-only assets", async () => {
   assert.match(gameClient, /VERSUS_SPEED_STEP_SECONDS = 20/);
   assert.match(gameClient, /VERSUS_SPEED_STEP_MS = 45/);
   assert.match(gameClient, /VERSUS_MIN_GRAVITY_MS = 70/);
+  assert.match(gameClient, /GRAVITY_HEARTBEAT_MS = 32/);
+  assert.match(gameClient, /pieceCells\(activeRef\.current\)/);
+  assert.doesNotMatch(
+    gameClient,
+    /\[active, lines, mode, rules\.gravity, seconds/,
+  );
   assert.match(gameClient, /GARBAGE_QUEUE_DELAY_MS = 3500/);
   assert.match(gameClient, /MAX_GARBAGE_QUEUE = 40/);
   assert.match(gameClient, /for \(const offset of \[-1, 1, -2, 2, -3, 3\]\)/);
