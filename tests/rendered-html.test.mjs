@@ -288,8 +288,15 @@ test("ships without starter-only assets", async () => {
   assert.match(gameClient, /const visualOrigin/);
   assert.match(gameClient, /window\.performance\.now\(\) \+ 70/);
   assert.match(gameClient, /const BUFFER_ROWS = 3/);
+  assert.match(gameClient, /const HIDDEN_SPAWN_ROWS = 4/);
   assert.match(gameClient, /const VISIBLE_HEIGHT = 20/);
   assert.match(gameClient, /const HEIGHT = VISIBLE_HEIGHT \+ BUFFER_ROWS/);
+  assert.match(gameClient, /const RESCUE_LOCK_DELAY_MS = 700/);
+  assert.match(gameClient, /const MAX_RESCUE_GROUNDED_MS = 2400/);
+  assert.match(
+    gameClient,
+    /const rescueActive = pieceCells\(active\)\.some\(\(\[, y\]\) => y < BUFFER_ROWS\)/,
+  );
   assert.match(gameClient, /const DANGER_VISIBLE_ROWS = 7/);
   assert.match(gameClient, /VERSUS_SPEED_STEP_SECONDS = 20/);
   assert.match(gameClient, /VERSUS_SPEED_STEP_MS = 70/);
@@ -416,12 +423,17 @@ test("ships without starter-only assets", async () => {
   assert.match(gameClient, /aria-label="모바일 게임 조작"/);
   assert.match(gameClient, /initialDelay = 105/);
   assert.match(gameClient, /repeatRate = 38/);
-  assert.match(gameClient, /function spawn\(type: PieceName, y = BUFFER_ROWS\)/);
+  assert.match(
+    gameClient,
+    /function spawn\(type: PieceName, y = BUFFER_ROWS\)/,
+  );
   assert.match(gameClient, /function findSpawnPosition/);
   assert.match(
     gameClient,
-    /for \(let y = BUFFER_ROWS; y >= 0; y -= 1\)/,
+    /for \(let y = BUFFER_ROWS; y >= -HIDDEN_SPAWN_ROWS; y -= 1\)/,
   );
+  assert.match(gameClient, /if \(y < 0\) overflow = true/);
+  assert.match(gameClient, /if \(overflow\) \{\s*finish\(/);
   assert.match(gameClient, /gravity: 420/);
   assert.match(gameClient, /hold: "ShiftLeft"/);
   assert.match(gameClient, /Object\.values\(corners\)\.filter\(Boolean\)\.length < 3/);

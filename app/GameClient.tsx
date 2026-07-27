@@ -213,12 +213,18 @@ function rankRoomPlayers(players: RoomPlayer[], winnerId: string) {
 
 const WIDTH = 10;
 const VISIBLE_HEIGHT = 20;
+// Three rows are shown above the main field as the player's rescue area.
+// Active pieces may spawn farther above it, but locked blocks are never stored
+// invisibly there.
 const BUFFER_ROWS = 3;
+const HIDDEN_SPAWN_ROWS = 4;
 const HEIGHT = VISIBLE_HEIGHT + BUFFER_ROWS;
 const DANGER_VISIBLE_ROWS = 7;
 const LOCK_DELAY_MS = 350;
+const RESCUE_LOCK_DELAY_MS = 700;
 const MAX_LOCK_RESETS = 8;
 const MAX_GROUNDED_MS = 1800;
+const MAX_RESCUE_GROUNDED_MS = 2400;
 const HORIZONTAL_DAS_MS = 140;
 const HORIZONTAL_ARR_MS = 54;
 const JOYSTICK_DEADZONE = 22;
@@ -493,7 +499,7 @@ function spawn(type: PieceName, y = BUFFER_ROWS): Piece {
 }
 
 function findSpawnPosition(board: Board, type: PieceName): Piece | null {
-  for (let y = BUFFER_ROWS; y >= 0; y -= 1) {
+  for (let y = BUFFER_ROWS; y >= -HIDDEN_SPAWN_ROWS; y -= 1) {
     const candidate = spawn(type, y);
     if (!collides(board, candidate)) return candidate;
   }
@@ -1024,9 +1030,14 @@ function GameBoard({
       return;
     }
     const now = window.performance.now();
-    groundedLimitRef.current ??= now + MAX_GROUNDED_MS;
+    const rescueActive = pieceCells(active).some(([, y]) => y < BUFFER_ROWS);
+    const groundedLimit = rescueActive
+      ? MAX_RESCUE_GROUNDED_MS
+      : MAX_GROUNDED_MS;
+    const lockDelay = rescueActive ? RESCUE_LOCK_DELAY_MS : LOCK_DELAY_MS;
+    groundedLimitRef.current ??= now + groundedLimit;
     lockDeadlineRef.current ??= Math.min(
-      now + LOCK_DELAY_MS,
+      now + lockDelay,
       groundedLimitRef.current,
     );
     const remaining = Math.max(
@@ -1207,8 +1218,12 @@ function GameBoard({
     ) {
       return;
     }
+    const rescueActive = pieceCells(activeRef.current).some(
+      ([, y]) => y < BUFFER_ROWS,
+    );
     lockDeadlineRef.current = Math.min(
-      window.performance.now() + LOCK_DELAY_MS,
+      window.performance.now() +
+        (rescueActive ? RESCUE_LOCK_DELAY_MS : LOCK_DELAY_MS),
       groundedLimitRef.current,
     );
     lockResetCount.current += 1;
@@ -1743,11 +1758,11 @@ function GameBoard({
             aria-hidden="true"
             className={`buffer-zone ${bufferDanger ? "buffer-zone-danger" : ""}`}
           >
-            {rendered.slice(0, BUFFER_ROWS).flatMap((row, y) =>
+            {rendered.slice(0, BUFFER_ROWS).flatMap((row, bufferY) =>
               row.map((cell, x) => (
                 <span
                   className={`cell ${cell ? `piece-${cell}` : ""}`}
-                  key={`buffer-${x}-${y}`}
+                  key={`buffer-${x}-${bufferY}`}
                 />
               )),
             )}
