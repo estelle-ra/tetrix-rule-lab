@@ -275,6 +275,11 @@ test("ships without starter-only assets", async () => {
   assert.match(gameClient, /garbageAppliedTotalRef/);
   assert.match(gameClient, /const liftedActive/);
   assert.match(gameClient, /const overflowedRows/);
+  assert.doesNotMatch(gameClient, /activeOverflow/);
+  assert.match(
+    gameClient,
+    /const applyTimer = window\.setTimeout\(\(\) => \{[\s\S]*garbageAppliedTotalRef\.current = garbage\.amount/,
+  );
   assert.match(gameClient, /REALTIME READY/);
   assert.match(gameClient, /SUPABASE REALTIME/);
   assert.match(gameClient, /REALTIME_SNAPSHOT_UPLINK_MS = 400/);

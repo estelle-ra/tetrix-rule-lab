@@ -1013,10 +1013,13 @@ function GameBoard({
       garbage.amount - garbageAppliedTotalRef.current,
     );
     if (!pendingAmount) return;
-    garbageAppliedTotalRef.current = garbage.amount;
     lastGarbageAtRef.current = Date.now();
     let clearTimer: number | undefined;
     const applyTimer = window.setTimeout(() => {
+      // Mark the cumulative signal as consumed only when it is actually
+      // applied. A newer signal can otherwise cancel this timer and lose the
+      // earlier garbage amount.
+      garbageAppliedTotalRef.current = garbage.amount;
       const amount = Math.min(pendingAmount, VISIBLE_HEIGHT);
       const hole = Math.floor(Math.random() * WIDTH);
       const currentBoard = boardRef.current;
@@ -1033,7 +1036,6 @@ function GameBoard({
         ...activeRef.current,
         y: activeRef.current.y - amount,
       };
-      const activeOverflow = pieceCells(liftedActive).some(([, y]) => y < 0);
       boardRef.current = shifted;
       activeRef.current = liftedActive;
       setBoard(shifted);
@@ -1045,7 +1047,10 @@ function GameBoard({
       );
       setFlash(`+${pendingAmount} GARBAGE`);
       clearTimer = window.setTimeout(() => setFlash(""), 620);
-      if (overflowedRows || activeOverflow) {
+      // A falling piece may temporarily move above the hidden buffer when
+      // several attacks arrive together. Only locked stack cells pushed out
+      // of the buffer are a real top-out.
+      if (overflowedRows) {
         finish("lost", "garbage");
       }
     }, 0);
