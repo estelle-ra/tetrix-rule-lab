@@ -763,6 +763,7 @@ input:focus-visible {
     clamp(118px, 13vw, 170px)
     auto
     clamp(118px, 13vw, 170px);
+  margin-bottom: calc(var(--cell) * 2);
   padding-top: calc(var(--cell) * 3);
 }
 
@@ -780,7 +781,7 @@ input:focus-visible {
   .screen-playing .game-rig {
     --cell: clamp(
       18px,
-      min(5.2vw, calc((100dvh - 260px) / 23)),
+      min(5.2vw, calc((100dvh - 260px) / 25)),
       64px
     );
   }
@@ -803,7 +804,7 @@ input:focus-visible {
       19px,
       min(
         calc((100vw - 740px) / 10),
-        calc((100dvh - 146px) / 23)
+        calc((100dvh - 146px) / 25)
       ),
       64px
     );
@@ -871,6 +872,55 @@ input:focus-visible {
 .buffer-zone .cell {
   background: transparent;
   border-color: transparent;
+}
+
+.garbage-meter {
+  --garbage-level: 0%;
+  background:
+    repeating-linear-gradient(
+      to top,
+      rgba(255, 255, 255, 0.055) 0,
+      rgba(255, 255, 255, 0.055) calc(5% - 1px),
+      rgba(255, 255, 255, 0.2) calc(5% - 1px),
+      rgba(255, 255, 255, 0.2) 5%
+    ),
+    rgba(4, 6, 8, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  bottom: 3px;
+  left: -15px;
+  overflow: visible;
+  pointer-events: none;
+  position: absolute;
+  top: 3px;
+  width: 9px;
+  z-index: 9;
+}
+
+.garbage-meter i {
+  background: linear-gradient(to top, #ff5739 0%, #ffbe44 58%, #f3f76a 100%);
+  bottom: 0;
+  box-shadow: 0 0 8px rgba(255, 87, 57, 0.52);
+  height: var(--garbage-level);
+  left: 1px;
+  position: absolute;
+  right: 1px;
+  transition: height 140ms ease;
+}
+
+.garbage-meter em {
+  background: #ff6f39;
+  color: #07090b;
+  font: 800 10px/16px monospace;
+  left: -6px;
+  min-width: 20px;
+  padding: 0 3px;
+  position: absolute;
+  text-align: center;
+  top: -20px;
+}
+
+.garbage-meter-active {
+  border-color: rgba(255, 190, 68, 0.72);
 }
 
 .cell {
@@ -4248,7 +4298,7 @@ footer {
                   env(safe-area-inset-bottom)
               )
             ) /
-            23
+            25
         )
       ),
       26px
@@ -4634,7 +4684,7 @@ footer {
       14px,
       min(
         calc((100vw - 150px) / 10),
-        calc((var(--visual-viewport-height) - 210px) / 23)
+        calc((var(--visual-viewport-height) - 210px) / 25)
       ),
       26px
     );
@@ -5033,7 +5083,7 @@ footer {
   .game-rig {
     --cell: clamp(
       17px,
-      min(8.5vw, calc((100dvh - 390px) / 23)),
+      min(8.5vw, calc((100dvh - 390px) / 25)),
       31px
     );
   }
