@@ -1133,8 +1133,8 @@ input:focus-visible {
   filter: drop-shadow(0 0 12px rgba(255, 217, 80, 0.62));
 }
 
-.board-impact .board {
-  animation: hard-drop-shake 240ms cubic-bezier(0.2, 0.8, 0.2, 1);
+.board-impact {
+  animation: hard-drop-shake 340ms cubic-bezier(0.16, 0.84, 0.22, 1);
 }
 
 .hard-drop-impact {
@@ -1147,7 +1147,7 @@ input:focus-visible {
 }
 
 .hard-drop-impact i {
-  animation: hard-drop-star 250ms ease-out var(--impact-delay) both;
+  animation: hard-drop-star 340ms ease-out var(--impact-delay) both;
   color: var(--impact-color);
   filter: drop-shadow(0 0 6px var(--impact-color));
   font-size: var(--impact-size);
@@ -1235,9 +1235,10 @@ input:focus-visible {
 
 @keyframes hard-drop-shake {
   0% { transform: translateY(0); }
-  20% { transform: translateY(5px) scaleY(0.992); }
-  45% { transform: translateY(-2px); }
-  70% { transform: translateY(1px); }
+  16% { transform: translateY(8px) scaleY(0.982); }
+  34% { transform: translateY(-4px) scaleY(1.006); }
+  54% { transform: translateY(2px); }
+  72% { transform: translateY(-1px); }
   100% { transform: translateY(0); }
 }
 
@@ -2309,6 +2310,10 @@ button.online-choice:hover {
 }
 
 .mobile-opponent-strip {
+  display: none;
+}
+
+.mobile-match-chat {
   display: none;
 }
 
@@ -4266,6 +4271,55 @@ footer {
     scrollbar-width: none;
   }
 
+  .mobile-match-chat {
+    display: block;
+    margin: 0 5px 6px;
+  }
+
+  .mobile-match-chat .party-chat {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    margin: 0;
+  }
+
+  .mobile-match-chat .party-chat-head {
+    min-height: 24px;
+    padding: 4px 8px;
+  }
+
+  .mobile-match-chat .party-chat-head strong {
+    font-size: 9px;
+  }
+
+  .mobile-match-chat .party-chat-head span {
+    font-size: 7px;
+  }
+
+  .mobile-match-chat .party-chat-log {
+    height: 32px;
+    padding: 3px 8px;
+  }
+
+  .mobile-match-chat .party-chat-log p {
+    font-size: 10px;
+    line-height: 1.35;
+    margin: 1px 0;
+  }
+
+  .mobile-match-chat .party-chat-form {
+    grid-template-columns: minmax(0, 1fr) 52px;
+  }
+
+  .mobile-match-chat .party-chat-form input {
+    font-size: 12px;
+    height: 34px;
+    padding: 0 9px;
+  }
+
+  .mobile-match-chat .party-chat-form button {
+    font-size: 8px;
+  }
+
   .mobile-opponent-card {
     background: #11151a;
     border: 1px solid #303741;
@@ -4449,7 +4503,7 @@ footer {
     grid-template-columns: repeat(2, minmax(110px, 1fr));
   }
 
-  .online-spectating .party-chat {
+  .online-spectating .opponents-zone .party-chat {
     display: none;
   }
 

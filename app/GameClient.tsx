@@ -1226,6 +1226,9 @@ function GameBoard({
     const maxX = Math.max(...landingCells.map(([x]) => x));
     const bottomY = Math.max(...landingCells.map(([, y]) => y));
     const nextImpactId = Date.now();
+    if (distance > 0) {
+      navigator.vibrate?.(Math.min(34, 16 + distance));
+    }
     setImpactEffect({
       id: nextImpactId,
       x: ((minX + maxX + 1) / 2 / WIDTH) * 100,
@@ -1240,7 +1243,7 @@ function GameBoard({
         setImpactEffect((current) =>
           current?.id === nextImpactId ? null : current,
         ),
-      260,
+      360,
     );
     lockPiece(dropped);
   }, [active, board, clearRepeatHandles, lockPiece]);
@@ -1692,15 +1695,15 @@ function GameBoard({
                 } as CSSProperties
               }
             >
-              {Array.from({ length: 10 }, (_, index) => (
+              {Array.from({ length: 14 }, (_, index) => (
                 <i
                   key={index}
                   style={
                     {
-                      "--impact-x": `${Math.cos((index * 36 * Math.PI) / 180) * (25 + (index % 4) * 12)}px`,
-                      "--impact-y": `${Math.sin((index * 36 * Math.PI) / 180) * (18 + (index % 3) * 10) - 8}px`,
-                      "--impact-delay": `${(index % 3) * 18}ms`,
-                      "--impact-size": `${8 + (index % 4) * 3}px`,
+                      "--impact-x": `${Math.cos((index * (360 / 14) * Math.PI) / 180) * (34 + (index % 5) * 12)}px`,
+                      "--impact-y": `${Math.sin((index * (360 / 14) * Math.PI) / 180) * (24 + (index % 4) * 10) - 10}px`,
+                      "--impact-delay": `${(index % 4) * 14}ms`,
+                      "--impact-size": `${9 + (index % 4) * 3}px`,
                     } as CSSProperties
                   }
                 >
@@ -1979,11 +1982,13 @@ function PartyChat({
   value,
   onChange,
   onSend,
+  globalShortcut = true,
 }: {
   messages: ChatMessage[];
   value: string;
   onChange: (value: string) => void;
   onSend: () => void;
+  globalShortcut?: boolean;
 }) {
   const endRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
@@ -1993,6 +1998,7 @@ function PartyChat({
   }, [messages]);
 
   useEffect(() => {
+    if (!globalShortcut) return;
     const focusChatWithEnter = (event: KeyboardEvent) => {
       if (
         event.key !== "Enter" ||
@@ -2017,7 +2023,7 @@ function PartyChat({
     };
     window.addEventListener("keydown", focusChatWithEnter);
     return () => window.removeEventListener("keydown", focusChatWithEnter);
-  }, []);
+  }, [globalShortcut]);
 
   return (
     <section className="party-chat" aria-label="멀티플레이 채팅">
@@ -2316,7 +2322,7 @@ function OnlineParty({
         if (!controls) return;
         const arenaTop = arena.getBoundingClientRect().top;
         const controlsTop = controls.getBoundingClientRect().top;
-        const available = Math.max(200, Math.floor(controlsTop - arenaTop - 12));
+        const available = Math.max(200, Math.floor(controlsTop - arenaTop - 18));
         arena.style.setProperty("--mobile-board-space", `${available}px`);
       });
     };
@@ -2328,6 +2334,7 @@ function OnlineParty({
       match?.querySelector<HTMLElement>(".online-match-bar"),
       match?.querySelector<HTMLElement>(".item-inventory"),
       match?.querySelector<HTMLElement>(".mobile-opponent-strip"),
+      match?.querySelector<HTMLElement>(".mobile-match-chat"),
     ].forEach((element) => {
       if (element) resizeObserver.observe(element);
     });
@@ -4041,6 +4048,7 @@ function OnlineParty({
   const isSpectating = Boolean(
     localPlayer && (!localPlayer.alive || localPlayer.spectating),
   );
+  const isLateJoinSpectator = Boolean(localPlayer?.spectating);
   const inventoryCounts = ITEM_TYPES.reduce<Record<ItemType, number>>(
     (counts, item) => ({
       ...counts,
@@ -4341,8 +4349,9 @@ function OnlineParty({
 
   return (
     <section
-      className={`online-match ${isSpectating ? "online-spectating" : ""} ${
-        phase === "ended" ? "online-ended" : ""
+      className={`online-match ${isLateJoinSpectator ? "online-spectating" : ""} ${
+        isSpectating && !isLateJoinSpectator ? "online-eliminated" : ""
+      } ${phase === "ended" ? "online-ended" : ""
       } ${phase === "countdown" ? "online-countdown" : ""}`}
     >
       <div className="online-match-bar">
@@ -4371,7 +4380,7 @@ function OnlineParty({
           </div>
         ))}
       </div>
-      {matchRules.itemsEnabled && !isSpectating && (
+      {matchRules.itemsEnabled && !isLateJoinSpectator && (
         <div className="item-inventory" aria-label="보유 공격 아이템">
           <span>
             {matchRules.itemMode === "blocks"
@@ -4391,6 +4400,7 @@ function OnlineParty({
                     title={`${ITEM_META[item].label} 선택`}
                     aria-label={`${ITEM_META[item].label} 아이템 선택, ${inventoryCounts[item]}개 보유`}
                     aria-pressed={currentItem === item}
+                    disabled={isSpectating}
                     onClick={() => selectInventoryItem(item)}
                   >
                     <i>{ITEM_META[item].icon}</i>
@@ -4413,7 +4423,7 @@ function OnlineParty({
             className={`mobile-inventory-fire ${
               currentItem ? `item-use-${currentItem}` : ""
             }`}
-            disabled={!currentItem || !selectedItemTarget}
+            disabled={isSpectating || !currentItem || !selectedItemTarget}
             onClick={() => {
               if (selectedItemTarget) activateItem(selectedItemTarget.id);
             }}
@@ -4477,6 +4487,17 @@ function OnlineParty({
           </article>
         ))}
       </div>
+      {(phase !== "ended" || !showResultCard) && (
+        <div className="mobile-match-chat">
+          <PartyChat
+            messages={chatMessages}
+            value={chatText}
+            onChange={setChatText}
+            onSend={sendChat}
+            globalShortcut={false}
+          />
+        </div>
+      )}
       <div className="online-arena" ref={onlineArenaRef}>
         <div className="local-board-zone">
           {phase === "countdown" ? (
@@ -4496,13 +4517,7 @@ function OnlineParty({
             </div>
           ) : localPlayer && !localPlayer.spectating ? (
             <>
-              <div
-                className={
-                  isSpectating && phase !== "ended"
-                    ? "preserved-local-board preserved-local-board-hidden"
-                    : "preserved-local-board"
-                }
-              >
+              <div className="preserved-local-board">
                 <GameBoard
                   key={matchId}
                   player={localPlayer.name}
@@ -4524,7 +4539,7 @@ function OnlineParty({
                   }
                 />
               </div>
-              {isSpectating && phase !== "ended" && (
+              {isLateJoinSpectator && phase !== "ended" && (
                 <div className="spectator-banner">
                   <span>SPECTATING</span>
                   <strong>생존자의 플레이를 관전 중입니다.</strong>
@@ -5401,6 +5416,12 @@ export default function GameClient() {
       }
     }
     setMultiplayerPlaying(false);
+    if (nextScreen === "versus" && rules.targetMode !== "cycle") {
+      setRules({
+        ...rules,
+        targetMode: "cycle",
+      });
+    }
     if (nextScreen !== "versus") {
       setInviteRoomCode("");
       setGameTheme((current) => pickGameTheme(current));

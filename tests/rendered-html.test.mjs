@@ -229,11 +229,26 @@ test("ships without starter-only assets", async () => {
   assert.match(gameClient, /remote-ink-overlay/);
   assert.match(gameClient, /focusChatWithEnter/);
   assert.match(gameClient, /inputRef\.current\?\.focus\(\)/);
+  assert.match(gameClient, /globalShortcut = true/);
+  assert.match(gameClient, /className="mobile-match-chat"/);
+  assert.match(gameClient, /const isLateJoinSpectator/);
+  assert.match(
+    gameClient,
+    /isSpectating && !isLateJoinSpectator \? "online-eliminated"/,
+  );
+  assert.match(
+    gameClient,
+    /matchRules\.itemsEnabled && !isLateJoinSpectator/,
+  );
+  assert.doesNotMatch(
+    gameClient,
+    /isSpectating && phase !== "ended"\s*\?\s*"preserved-local-board preserved-local-board-hidden"/,
+  );
   assert.match(gameClient, /window\.visualViewport/);
   assert.match(gameClient, /--visual-viewport-height/);
   assert.match(gameClient, /onlineArenaRef/);
   assert.match(gameClient, /new ResizeObserver\(updateBoardSpace\)/);
-  assert.match(gameClient, /controlsTop - arenaTop - 12/);
+  assert.match(gameClient, /controlsTop - arenaTop - 18/);
   assert.match(gameClient, /블록 왼쪽으로 한 칸 이동/);
   assert.match(gameClient, /블록 오른쪽으로 한 칸 이동/);
   assert.match(gameClient, /setInkSignal\(\{ id: 0 \}\)/);
@@ -354,12 +369,16 @@ test("ships without starter-only assets", async () => {
   assert.match(gameClient, /className="match-countdown"/);
   assert.match(gameClient, /OUT OF FOCUS/);
   assert.match(gameClient, /hard-drop-impact impact-/);
+  assert.match(gameClient, /navigator\.vibrate\?\./);
+  assert.match(gameClient, /Array\.from\(\{ length: 14 \}/);
   assert.match(gameClient, /clear-particles-/);
   assert.match(gameClient, /fullRowIndexes/);
   assert.match(gameClient, /--impact-y/);
   assert.match(gameClient, /--particle-origin-y/);
   assert.match(gameClient, /particle-shape-/);
   assert.match(globalCss, /@keyframes hard-drop-shake/);
+  assert.match(globalCss, /\.board-impact \{[\s\S]*340ms/);
+  assert.match(globalCss, /\.mobile-match-chat/);
   assert.match(globalCss, /@keyframes line-particle-burst/);
   assert.match(globalCss, /@keyframes line-callout/);
   assert.match(globalCss, /\.particle-shape-1/);
