@@ -289,7 +289,7 @@ test("ships without starter-only assets", async () => {
   assert.match(gameClient, /VERSUS_SPEED_STEP_SECONDS = 20/);
   assert.match(gameClient, /VERSUS_SPEED_STEP_MS = 45/);
   assert.match(gameClient, /VERSUS_MIN_GRAVITY_MS = 70/);
-  assert.match(gameClient, /GARBAGE_QUEUE_DELAY_MS = 1600/);
+  assert.match(gameClient, /GARBAGE_QUEUE_DELAY_MS = 3500/);
   assert.match(gameClient, /MAX_GARBAGE_QUEUE = 40/);
   assert.match(gameClient, /for \(const offset of \[-1, 1, -2, 2, -3, 3\]\)/);
   assert.match(gameClient, /sharedStartAt=\{matchStartedAt\}/);
@@ -303,7 +303,13 @@ test("ships without starter-only assets", async () => {
   assert.match(gameClient, /const enqueueGarbage/);
   assert.match(gameClient, /const cancelPendingGarbage/);
   assert.match(gameClient, /pendingGarbage=\{pendingGarbage\}/);
+  assert.match(
+    gameClient,
+    /pendingGarbageDeadline=\{pendingGarbageDeadline\}/,
+  );
   assert.match(gameClient, /className=\{`garbage-meter/);
+  assert.match(gameClient, /className="combo-attack-effect"/);
+  assert.match(gameClient, /className=\{`item-launch-effect/);
   assert.match(gameClient, /rules=\{\{ \.\.\.rules, itemsEnabled: false \}\}/);
   assert.match(gameClient, /garbageAppliedTotalRef/);
   assert.match(gameClient, /const liftedActive/);
@@ -346,6 +352,9 @@ test("ships without starter-only assets", async () => {
   assert.match(globalCss, /padding-top: calc\(var\(--cell\) \* 3\)/);
   assert.match(globalCss, /margin-bottom: calc\(var\(--cell\) \* 2\)/);
   assert.match(globalCss, /\.garbage-meter/);
+  assert.match(globalCss, /\.board-danger/);
+  assert.match(globalCss, /\.combo-attack-effect/);
+  assert.match(globalCss, /\.item-launch-effect/);
   assert.match(globalCss, /\.buffer-zone-danger/);
   assert.match(globalCss, /grid-template-rows: repeat\(20, 1fr\)/);
   assert.match(globalCss, /\.matchup-list/);

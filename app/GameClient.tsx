@@ -227,7 +227,7 @@ const SPIN_EFFECT_MS = 5000;
 const VERSUS_SPEED_STEP_SECONDS = 20;
 const VERSUS_SPEED_STEP_MS = 45;
 const VERSUS_MIN_GRAVITY_MS = 70;
-const GARBAGE_QUEUE_DELAY_MS = 1600;
+const GARBAGE_QUEUE_DELAY_MS = 3500;
 const MAX_GARBAGE_QUEUE = 40;
 const MAX_ITEM_INVENTORY = 30;
 // Eight players peak near 48 Realtime messages/s, leaving room for attacks and chat.
@@ -618,6 +618,7 @@ type BoardProps = {
   compact?: boolean;
   garbage?: { id: number; amount: number };
   pendingGarbage?: number;
+  pendingGarbageDeadline?: number;
   ink?: { id: number };
   itemEffect?: { id: number; item: Exclude<ItemType, "ink"> };
   matchOutcome?: "won" | "lost" | null;
@@ -640,6 +641,7 @@ function GameBoard({
   compact = false,
   garbage,
   pendingGarbage = 0,
+  pendingGarbageDeadline = 0,
   ink,
   itemEffect,
   matchOutcome = null,
@@ -677,6 +679,11 @@ function GameBoard({
   const [status, setStatus] = useState<Status>("playing");
   const [seconds, setSeconds] = useState(mode === "blitz" ? 120 : 0);
   const [flash, setFlash] = useState("");
+  const [comboEffect, setComboEffect] = useState<{
+    id: number;
+    chain: number;
+    bonus: number;
+  } | null>(null);
   const [clearEffect, setClearEffect] = useState<{
     id: number;
     lines: number;
@@ -901,6 +908,22 @@ function GameBoard({
           0,
           Math.round((attackBase + Math.max(0, nextCombo - 1)) * rules.attack),
         );
+        const comboBonus = Math.max(0, nextCombo - 1);
+        if (comboBonus > 0) {
+          const effect = {
+            id: Date.now(),
+            chain: nextCombo + 1,
+            bonus: Math.max(1, Math.round(comboBonus * rules.attack)),
+          };
+          setComboEffect(effect);
+          window.setTimeout(
+            () =>
+              setComboEffect((current) =>
+                current?.id === effect.id ? null : current,
+              ),
+            1050,
+          );
+        }
         if (attack > 0) onAttack?.(attack);
         const tSpinNames = ["T-SPIN!", "T-SPIN SINGLE!", "T-SPIN DOUBLE!", "T-SPIN TRIPLE!"];
         const miniTSpinNames = [
@@ -1674,7 +1697,11 @@ function GameBoard({
           </div>
         </aside>
 
-        <div className={`board-shell ${impactEffect ? "board-impact" : ""}`}>
+        <div
+          className={`board-shell ${impactEffect ? "board-impact" : ""} ${
+            bufferDanger ? "board-danger" : ""
+          }`}
+        >
           {mode === "versus" && (
             <div
               aria-label={`대기 중인 공격 ${pendingGarbage}줄`}
@@ -1694,6 +1721,17 @@ function GameBoard({
                 }
               />
               {pendingGarbage > 0 && <em>{pendingGarbage}</em>}
+              {pendingGarbage > 0 && (
+                <b
+                  aria-hidden="true"
+                  key={pendingGarbageDeadline}
+                  style={
+                    {
+                      "--garbage-delay": `${GARBAGE_QUEUE_DELAY_MS}ms`,
+                    } as CSSProperties
+                  }
+                />
+              )}
             </div>
           )}
           <div
@@ -1737,6 +1775,16 @@ function GameBoard({
               } ${flash === "QUAD!" ? "line-flash-quad" : ""}`}
             >
               {flash}
+            </div>
+          )}
+          {comboEffect && (
+            <div
+              className="combo-attack-effect"
+              key={comboEffect.id}
+              aria-live="polite"
+            >
+              <strong>COMBO ×{comboEffect.chain}</strong>
+              <span>+{comboEffect.bonus} ATTACK</span>
             </div>
           )}
           {impactEffect && (
@@ -2297,6 +2345,7 @@ function OnlineParty({
   const [matchRules, setMatchRules] = useState(rules);
   const [garbageSignal, setGarbageSignal] = useState({ id: 0, amount: 0 });
   const [pendingGarbage, setPendingGarbage] = useState(0);
+  const [pendingGarbageDeadline, setPendingGarbageDeadline] = useState(0);
   const [inkSignal, setInkSignal] = useState({ id: 0 });
   const [itemEffectSignal, setItemEffectSignal] = useState<{
     id: number;
@@ -2309,6 +2358,11 @@ function OnlineParty({
   const [attackLogs, setAttackLogs] = useState<AttackLog[]>([]);
   const [selectedTargetId, setSelectedTargetId] = useState("");
   const [itemInventory, setItemInventory] = useState<ItemType[]>([]);
+  const [itemLaunchEffect, setItemLaunchEffect] = useState<{
+    id: number;
+    item: ItemType;
+    targetName: string;
+  } | null>(null);
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [chatText, setChatText] = useState("");
   const [countdownValue, setCountdownValue] = useState(3);
@@ -2343,6 +2397,7 @@ function OnlineParty({
   const countdownTimerRef = useRef<number | null>(null);
   const resultRevealTimerRef = useRef<number | null>(null);
   const garbageQueueTimerRef = useRef<number | null>(null);
+  const itemLaunchTimerRef = useRef<number | null>(null);
   const pendingGarbageRef = useRef(0);
   const activeMatchIdRef = useRef(0);
   const resultMatchIdRef = useRef(0);
@@ -2451,6 +2506,13 @@ function OnlineParty({
     }
   };
 
+  const clearItemLaunchTimer = () => {
+    if (itemLaunchTimerRef.current !== null) {
+      window.clearTimeout(itemLaunchTimerRef.current);
+      itemLaunchTimerRef.current = null;
+    }
+  };
+
   const replacePendingGarbage = (next: number) => {
     const normalized = Math.max(
       0,
@@ -2464,6 +2526,7 @@ function OnlineParty({
     clearGarbageQueueTimer();
     const amount = pendingGarbageRef.current;
     if (!amount || phaseRef.current !== "playing") return;
+    setPendingGarbageDeadline(0);
     replacePendingGarbage(0);
     setGarbageSignal((current) => ({
       id: current.id + 1,
@@ -2478,7 +2541,10 @@ function OnlineParty({
   ) => {
     clearResultReveal();
     clearGarbageQueueTimer();
+    clearItemLaunchTimer();
+    setPendingGarbageDeadline(0);
     replacePendingGarbage(0);
+    setItemLaunchEffect(null);
     setWinnerId(nextWinnerId);
     setWinnerName(nextWinnerName);
     setMatchEndedAt(endedAt);
@@ -2528,12 +2594,12 @@ function OnlineParty({
       return;
     }
     replacePendingGarbage(pendingGarbageRef.current + Math.round(amount));
-    if (garbageQueueTimerRef.current === null) {
-      garbageQueueTimerRef.current = window.setTimeout(
-        applyPendingGarbage,
-        GARBAGE_QUEUE_DELAY_MS,
-      );
-    }
+    clearGarbageQueueTimer();
+    setPendingGarbageDeadline(Date.now() + GARBAGE_QUEUE_DELAY_MS);
+    garbageQueueTimerRef.current = window.setTimeout(
+      applyPendingGarbage,
+      GARBAGE_QUEUE_DELAY_MS,
+    );
   };
 
   const cancelPendingGarbage = (amount: number) => {
@@ -2541,7 +2607,10 @@ function OnlineParty({
     const canceled = Math.min(pendingGarbageRef.current, outgoing);
     if (!canceled) return outgoing;
     replacePendingGarbage(pendingGarbageRef.current - canceled);
-    if (!pendingGarbageRef.current) clearGarbageQueueTimer();
+    if (!pendingGarbageRef.current) {
+      clearGarbageQueueTimer();
+      setPendingGarbageDeadline(0);
+    }
     return outgoing - canceled;
   };
 
@@ -3300,6 +3369,7 @@ function OnlineParty({
       setShowResultCard(false);
       setLocalEndReason("topout");
       clearGarbageQueueTimer();
+      setPendingGarbageDeadline(0);
       replacePendingGarbage(0);
       setGarbageSignal({ id: 0, amount: 0 });
       setInkSignal({ id: 0 });
@@ -3352,6 +3422,7 @@ function OnlineParty({
       clearCountdown();
       clearResultReveal();
       clearGarbageQueueTimer();
+      setPendingGarbageDeadline(0);
       replacePendingGarbage(0);
       setGarbageSignal({ id: 0, amount: 0 });
       replacePlayers(packet.players);
@@ -3834,7 +3905,10 @@ function OnlineParty({
     clearCountdown();
     clearResultReveal();
     clearGarbageQueueTimer();
+    clearItemLaunchTimer();
+    setPendingGarbageDeadline(0);
     replacePendingGarbage(0);
+    setItemLaunchEffect(null);
     setGarbageSignal({ id: 0, amount: 0 });
     setInkSignal({ id: 0 });
     setItemEffectSignal(null);
@@ -3924,7 +3998,10 @@ function OnlineParty({
     setMatchEndedAt(0);
     setMatchRules(rulesRef.current);
     clearGarbageQueueTimer();
+    clearItemLaunchTimer();
+    setPendingGarbageDeadline(0);
     replacePendingGarbage(0);
+    setItemLaunchEffect(null);
     setGarbageSignal({ id: 0, amount: 0 });
     broadcast({
       type: "start",
@@ -4020,14 +4097,36 @@ function OnlineParty({
     const activeLocalPlayer = playersRef.current.find(
       (player) => player.id === localIdRef.current,
     );
+    const target = playersRef.current.find(
+      (player) =>
+        player.id === targetId &&
+        player.id !== localIdRef.current &&
+        player.alive &&
+        player.connected,
+    );
     const item = itemInventoryRef.current[0];
     if (
       !matchRules.itemsEnabled ||
       !item ||
-      !activeLocalPlayer?.alive
+      !activeLocalPlayer?.alive ||
+      !target
     ) {
       return;
     }
+    clearItemLaunchTimer();
+    const launch = {
+      id: Date.now(),
+      item,
+      targetName: target.name,
+    };
+    setItemLaunchEffect(launch);
+    navigator.vibrate?.([24, 28, 38]);
+    itemLaunchTimerRef.current = window.setTimeout(() => {
+      setItemLaunchEffect((current) =>
+        current?.id === launch.id ? null : current,
+      );
+      itemLaunchTimerRef.current = null;
+    }, 1250);
     replaceItemInventory(itemInventoryRef.current.slice(1));
     if (roleRef.current === "host") {
       routeItem(localIdRef.current, targetId, item);
@@ -4101,7 +4200,10 @@ function OnlineParty({
     clearCountdown();
     clearResultReveal();
     clearGarbageQueueTimer();
+    clearItemLaunchTimer();
+    setPendingGarbageDeadline(0);
     replacePendingGarbage(0);
+    setItemLaunchEffect(null);
     setGarbageSignal({ id: 0, amount: 0 });
     connectionAttemptRef.current += 1;
     removeRealtimeChannel();
@@ -4146,6 +4248,7 @@ function OnlineParty({
       clearCountdown();
       clearResultReveal();
       clearGarbageQueueTimer();
+      clearItemLaunchTimer();
       removeRealtimeChannel();
       connectionsRef.current.forEach((connection) => connection.close());
       hostConnectionRef.current?.close();
@@ -4505,6 +4608,20 @@ function OnlineParty({
           </div>
         ))}
       </div>
+      {itemLaunchEffect && (
+        <div
+          className={`item-launch-effect item-launch-${itemLaunchEffect.item}`}
+          key={itemLaunchEffect.id}
+          aria-live="polite"
+        >
+          <i>{ITEM_META[itemLaunchEffect.item].icon}</i>
+          <span>
+            <strong>{ITEM_META[itemLaunchEffect.item].short} SENT</strong>
+            <em>→ {itemLaunchEffect.targetName}</em>
+          </span>
+          <b aria-hidden="true" />
+        </div>
+      )}
       {matchRules.itemsEnabled && !isLateJoinSpectator && (
         <div className="item-inventory" aria-label="보유 공격 아이템">
           <span>
@@ -4655,6 +4772,7 @@ function OnlineParty({
                   mobileControlLayout={mobileControlLayout}
                   garbage={garbageSignal}
                   pendingGarbage={pendingGarbage}
+                  pendingGarbageDeadline={pendingGarbageDeadline}
                   ink={inkSignal}
                   itemEffect={itemEffectSignal ?? undefined}
                   onAttack={sendAttack}
