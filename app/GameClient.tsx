@@ -224,6 +224,9 @@ const JOYSTICK_HORIZONTAL_ARR_MS = 66;
 const INK_EFFECT_MS = 4200;
 const SPEED_EFFECT_MS = 7000;
 const SPIN_EFFECT_MS = 5000;
+const VERSUS_SPEED_STEP_SECONDS = 20;
+const VERSUS_SPEED_STEP_MS = 45;
+const VERSUS_MIN_GRAVITY_MS = 70;
 const MAX_ITEM_INVENTORY = 30;
 // Eight players peak near 48 Realtime messages/s, leaving room for attacks and chat.
 const REALTIME_SNAPSHOT_UPLINK_MS = 400;
@@ -599,6 +602,7 @@ type BoardProps = {
   rules: Rules;
   mode: "sprint" | "blitz" | "zen" | "versus";
   pieceSeed?: number;
+  sharedStartAt?: number;
   compact?: boolean;
   garbage?: { id: number; amount: number };
   ink?: { id: number };
@@ -619,6 +623,7 @@ function GameBoard({
   rules,
   mode,
   pieceSeed,
+  sharedStartAt,
   compact = false,
   garbage,
   ink,
@@ -679,7 +684,7 @@ function GameBoard({
   const [spinLocked, setSpinLocked] = useState(false);
   const finishSent = useRef(false);
   const resultSent = useRef(false);
-  const startedAt = useRef(0);
+  const startedAt = useRef(sharedStartAt ?? 0);
   const snapshotSentAt = useRef(0);
   const onSnapshotRef = useRef(onSnapshot);
   const repeatHandles = useRef(new Map<string, RepeatHandle>());
@@ -704,8 +709,8 @@ function GameBoard({
   const activeRef = useRef(active);
 
   useEffect(() => {
-    startedAt.current = Date.now();
-  }, []);
+    startedAt.current = sharedStartAt ?? Date.now();
+  }, [sharedStartAt]);
 
   useEffect(() => {
     boardRef.current = board;
@@ -943,9 +948,15 @@ function GameBoard({
 
   useEffect(() => {
     if (status !== "playing") return;
+    const versusSpeedSteps =
+      mode === "versus"
+        ? Math.floor(seconds / VERSUS_SPEED_STEP_SECONDS)
+        : 0;
     const normalGravity = Math.max(
-      90,
-      rules.gravity - Math.floor(lines / 10) * 55,
+      mode === "versus" ? VERSUS_MIN_GRAVITY_MS : 90,
+      rules.gravity -
+        Math.floor(lines / 10) * 55 -
+        versusSpeedSteps * VERSUS_SPEED_STEP_MS,
     );
     const enteringFromBuffer = pieceCells(active).every(
       ([, y]) => y < BUFFER_ROWS,
@@ -957,7 +968,7 @@ function GameBoard({
         : normalGravity;
     const timer = window.setInterval(() => stepDownRef.current(), gravity);
     return () => window.clearInterval(timer);
-  }, [active, lines, rules.gravity, speedActive, status]);
+  }, [active, lines, mode, rules.gravity, seconds, speedActive, status]);
 
   useEffect(() => {
     if (status !== "playing") return;
@@ -990,11 +1001,17 @@ function GameBoard({
           finish("won");
           return 0;
         }
+        if (mode === "versus" && sharedStartAt) {
+          return Math.max(
+            0,
+            Math.floor((Date.now() - sharedStartAt) / 1000),
+          );
+        }
         return mode === "blitz" ? value - 1 : value + 1;
       });
     }, 1000);
     return () => window.clearInterval(timer);
-  }, [finish, mode, status]);
+  }, [finish, mode, sharedStartAt, status]);
 
   useEffect(() => {
     if (
@@ -1232,10 +1249,7 @@ function GameBoard({
     setImpactEffect({
       id: nextImpactId,
       x: ((minX + maxX + 1) / 2 / WIDTH) * 100,
-      y:
-        ((Math.max(BUFFER_ROWS, bottomY + 1) - BUFFER_ROWS) /
-          VISIBLE_HEIGHT) *
-        100,
+      y: (Math.max(0, bottomY + 1) / HEIGHT) * 100,
       piece: dropped.type,
     });
     window.setTimeout(
@@ -1559,6 +1573,12 @@ function GameBoard({
         .some((row) => row.some(Boolean)),
     [board],
   );
+  const displayLevel =
+    Math.floor(lines / 10) +
+    (mode === "versus"
+      ? Math.floor(seconds / VERSUS_SPEED_STEP_SECONDS)
+      : 0) +
+    1;
 
   useEffect(() => {
     onSnapshotRef.current = onSnapshot;
@@ -1641,7 +1661,7 @@ function GameBoard({
         <div className={`board-shell ${impactEffect ? "board-impact" : ""}`}>
           <div
             aria-hidden="true"
-            className={`buffer-zone ${bufferDanger ? "buffer-zone-visible" : ""}`}
+            className={`buffer-zone ${bufferDanger ? "buffer-zone-danger" : ""}`}
           >
             {rendered.slice(0, BUFFER_ROWS).flatMap((row, y) =>
               row.map((cell, x) => (
@@ -1747,9 +1767,7 @@ function GameBoard({
                           "--particle-origin-x": `${originX}%`,
                           "--particle-origin-y": `${Math.max(
                             0,
-                            ((originRow - BUFFER_ROWS + 0.5) /
-                              VISIBLE_HEIGHT) *
-                              100,
+                            ((originRow + 0.5) / HEIGHT) * 100,
                           )}%`,
                           "--particle-x": `${Math.cos(angle) * distance}px`,
                           "--particle-y": `${Math.sin(angle) * distance}px`,
@@ -1820,7 +1838,7 @@ function GameBoard({
           </div>
           <div className="rail-stat level-stat">
             <small>LEVEL</small>
-            <strong>{Math.floor(lines / 10) + 1}</strong>
+            <strong>{displayLevel}</strong>
           </div>
         </aside>
       </div>
@@ -1990,11 +2008,12 @@ function PartyChat({
   onSend: () => void;
   globalShortcut?: boolean;
 }) {
-  const endRef = useRef<HTMLDivElement | null>(null);
+  const logRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
-    endRef.current?.scrollIntoView({ block: "nearest" });
+    const log = logRef.current;
+    if (log) log.scrollTop = log.scrollHeight;
   }, [messages]);
 
   useEffect(() => {
@@ -2034,7 +2053,7 @@ function PartyChat({
           <kbd>ENTER</kbd>
         </span>
       </div>
-      <div className="party-chat-log" aria-live="polite">
+      <div className="party-chat-log" aria-live="polite" ref={logRef}>
         {messages.length ? (
           messages.map((message) => (
             <p key={message.id}>
@@ -2047,7 +2066,6 @@ function PartyChat({
             방에 참가한 팀원들과 메시지를 주고받을 수 있습니다.
           </p>
         )}
-        <div ref={endRef} />
       </div>
       <form
         className="party-chat-form"
@@ -4504,7 +4522,7 @@ function OnlineParty({
             <div className="countdown-stage" aria-live="assertive">
               <div className="countdown-board" aria-hidden="true">
                 {Array.from(
-                  { length: VISIBLE_HEIGHT * WIDTH },
+                  { length: HEIGHT * WIDTH },
                   (_, index) => (
                   <i key={index} />
                   ),
@@ -4525,6 +4543,7 @@ function OnlineParty({
                   rules={matchRules}
                   mode="versus"
                   pieceSeed={matchId}
+                  sharedStartAt={matchStartedAt}
                   matchOutcome={localMatchOutcome}
                   mobileControlLayout={mobileControlLayout}
                   garbage={garbageSignal}

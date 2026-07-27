@@ -229,6 +229,7 @@ test("ships without starter-only assets", async () => {
   assert.match(gameClient, /remote-ink-overlay/);
   assert.match(gameClient, /focusChatWithEnter/);
   assert.match(gameClient, /inputRef\.current\?\.focus\(\)/);
+  assert.match(gameClient, /log\.scrollTop = log\.scrollHeight/);
   assert.match(gameClient, /globalShortcut = true/);
   assert.match(gameClient, /className="mobile-match-chat"/);
   assert.match(gameClient, /const isLateJoinSpectator/);
@@ -284,8 +285,17 @@ test("ships without starter-only assets", async () => {
   assert.match(gameClient, /window\.performance\.now\(\) \+ 70/);
   assert.match(gameClient, /const BUFFER_ROWS = 3/);
   assert.match(gameClient, /const VISIBLE_HEIGHT = 20/);
+  assert.match(gameClient, /const HEIGHT = VISIBLE_HEIGHT \+ BUFFER_ROWS/);
+  assert.match(gameClient, /VERSUS_SPEED_STEP_SECONDS = 20/);
+  assert.match(gameClient, /VERSUS_SPEED_STEP_MS = 45/);
+  assert.match(gameClient, /VERSUS_MIN_GRAVITY_MS = 70/);
+  assert.match(gameClient, /sharedStartAt=\{matchStartedAt\}/);
+  assert.match(gameClient, /versusSpeedSteps \* VERSUS_SPEED_STEP_MS/);
+  assert.match(gameClient, /Math\.floor\(\(Date\.now\(\) - sharedStartAt\) \/ 1000\)/);
   assert.match(gameClient, /visibleRendered/);
   assert.match(gameClient, /className=\{`buffer-zone/);
+  assert.match(gameClient, /buffer-zone-danger/);
+  assert.match(gameClient, /\{ length: HEIGHT \* WIDTH \}/);
   assert.match(gameClient, /const enqueueGarbage/);
   assert.match(gameClient, /garbageAppliedTotalRef/);
   assert.match(gameClient, /const liftedActive/);
@@ -309,7 +319,7 @@ test("ships without starter-only assets", async () => {
     gameClient,
     /sendRealtimePacket\(\{ type: "snapshot", snapshot \}\)/,
   );
-  assert.match(globalCss, /calc\(\(100dvh - 330px\) \/ 20\)/);
+  assert.match(globalCss, /calc\(\(100dvh - 146px\) \/ 23\)/);
   assert.match(globalCss, /env\(safe-area-inset-bottom\)/);
   assert.match(globalCss, /\.mobile-opponent-strip/);
   assert.match(globalCss, /grid-template-areas: "hold board next"/);
@@ -321,6 +331,9 @@ test("ships without starter-only assets", async () => {
   assert.match(globalCss, /\.touch-direction/);
   assert.match(globalCss, /\.control-layout-options/);
   assert.match(globalCss, /\.buffer-zone/);
+  assert.match(globalCss, /grid-template-rows: repeat\(3, var\(--cell\)\)/);
+  assert.match(globalCss, /\.buffer-zone-danger/);
+  assert.match(globalCss, /grid-template-rows: repeat\(23, 1fr\)/);
   assert.match(globalCss, /\.matchup-list/);
   assert.match(
     globalCss,
