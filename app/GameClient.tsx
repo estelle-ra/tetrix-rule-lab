@@ -473,13 +473,21 @@ function nextQueue(
   return output;
 }
 
-function spawn(type: PieceName): Piece {
+function spawn(type: PieceName, y = BUFFER_ROWS): Piece {
   return {
     type,
     rotation: 0,
     x: type === "O" ? 4 : 3,
-    y: 0,
+    y,
   };
+}
+
+function findSpawnPosition(board: Board, type: PieceName): Piece | null {
+  for (let y = BUFFER_ROWS; y >= 0; y -= 1) {
+    const candidate = spawn(type, y);
+    if (!collides(board, candidate)) return candidate;
+  }
+  return null;
 }
 
 function enabledItems(rules: Rules): ItemType[] {
@@ -805,7 +813,11 @@ function GameBoard({
         }));
 
       const replenished = nextQueue(queue, pieceRandomRef.current);
-      const nextPiece = spawn(replenished[0]);
+      const availableNextPiece = findSpawnPosition(
+        cleaned,
+        replenished[0],
+      );
+      const nextPiece = availableNextPiece ?? spawn(replenished[0]);
       const nextLines = lines + cleared;
       const nextCombo = cleared ? combo + 1 : -1;
       const baseScores = [0, 100, 300, 500, 800];
@@ -892,7 +904,7 @@ function GameBoard({
 
       if (mode === "sprint" && nextLines >= 40) {
         finish("won");
-      } else if (collides(cleaned, nextPiece)) {
+      } else if (!availableNextPiece) {
         finish(
           "lost",
           Date.now() - lastGarbageAtRef.current < 1600
@@ -1241,20 +1253,38 @@ function GameBoard({
     lastActionWasRotation.current = false;
     lastRotationKickIndex.current = -1;
     if (held) {
+      const nextPiece = findSpawnPosition(board, held);
+      if (!nextPiece) {
+        finish(
+          "lost",
+          Date.now() - lastGarbageAtRef.current < 1600
+            ? "garbage"
+            : "topout",
+        );
+        return;
+      }
       setHeld(active.type);
-      const nextPiece = spawn(held);
       activeRef.current = nextPiece;
       setActive(nextPiece);
     } else {
       const replenished = nextQueue(queue, pieceRandomRef.current);
+      const nextPiece = findSpawnPosition(board, replenished[0]);
+      if (!nextPiece) {
+        finish(
+          "lost",
+          Date.now() - lastGarbageAtRef.current < 1600
+            ? "garbage"
+            : "topout",
+        );
+        return;
+      }
       setHeld(active.type);
-      const nextPiece = spawn(replenished[0]);
       activeRef.current = nextPiece;
       setActive(nextPiece);
       setQueue(replenished.slice(1));
     }
     setCanHold(false);
-  }, [active.type, canHold, held, queue]);
+  }, [active.type, board, canHold, finish, held, queue]);
 
   const performAction = useCallback(
     (action: GameAction) => {

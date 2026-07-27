@@ -334,7 +334,12 @@ test("ships without starter-only assets", async () => {
   assert.match(gameClient, /aria-label="모바일 게임 조작"/);
   assert.match(gameClient, /initialDelay = 105/);
   assert.match(gameClient, /repeatRate = 38/);
-  assert.match(gameClient, /y: 0,/);
+  assert.match(gameClient, /function spawn\(type: PieceName, y = BUFFER_ROWS\)/);
+  assert.match(gameClient, /function findSpawnPosition/);
+  assert.match(
+    gameClient,
+    /for \(let y = BUFFER_ROWS; y >= 0; y -= 1\)/,
+  );
   assert.match(gameClient, /gravity: 420/);
   assert.match(gameClient, /hold: "ShiftLeft"/);
   assert.match(gameClient, /Object\.values\(corners\)\.filter\(Boolean\)\.length < 3/);
