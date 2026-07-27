@@ -295,7 +295,8 @@ test("ships without starter-only assets", async () => {
   assert.match(gameClient, /visibleRendered/);
   assert.match(gameClient, /className=\{`buffer-zone/);
   assert.match(gameClient, /buffer-zone-danger/);
-  assert.match(gameClient, /\{ length: HEIGHT \* WIDTH \}/);
+  assert.doesNotMatch(gameClient, /3 ROW BUFFER/);
+  assert.match(gameClient, /\{ length: VISIBLE_HEIGHT \* WIDTH \}/);
   assert.match(gameClient, /const enqueueGarbage/);
   assert.match(gameClient, /garbageAppliedTotalRef/);
   assert.match(gameClient, /const liftedActive/);
@@ -320,6 +321,7 @@ test("ships without starter-only assets", async () => {
     /sendRealtimePacket\(\{ type: "snapshot", snapshot \}\)/,
   );
   assert.match(globalCss, /calc\(\(100dvh - 146px\) \/ 23\)/);
+  assert.match(globalCss, /calc\(\(100dvh - 260px\) \/ 23\)/);
   assert.match(globalCss, /env\(safe-area-inset-bottom\)/);
   assert.match(globalCss, /\.mobile-opponent-strip/);
   assert.match(globalCss, /grid-template-areas: "hold board next"/);
@@ -332,8 +334,11 @@ test("ships without starter-only assets", async () => {
   assert.match(globalCss, /\.control-layout-options/);
   assert.match(globalCss, /\.buffer-zone/);
   assert.match(globalCss, /grid-template-rows: repeat\(3, var\(--cell\)\)/);
+  assert.match(globalCss, /bottom: calc\(100% \+ 1px\)/);
+  assert.match(globalCss, /position: absolute/);
+  assert.match(globalCss, /padding-top: calc\(var\(--cell\) \* 3\)/);
   assert.match(globalCss, /\.buffer-zone-danger/);
-  assert.match(globalCss, /grid-template-rows: repeat\(23, 1fr\)/);
+  assert.match(globalCss, /grid-template-rows: repeat\(20, 1fr\)/);
   assert.match(globalCss, /\.matchup-list/);
   assert.match(
     globalCss,

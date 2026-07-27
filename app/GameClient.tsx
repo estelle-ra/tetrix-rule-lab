@@ -1249,7 +1249,9 @@ function GameBoard({
     setImpactEffect({
       id: nextImpactId,
       x: ((minX + maxX + 1) / 2 / WIDTH) * 100,
-      y: (Math.max(0, bottomY + 1) / HEIGHT) * 100,
+      y:
+        (Math.max(0, bottomY + 1 - BUFFER_ROWS) / VISIBLE_HEIGHT) *
+        100,
       piece: dropped.type,
     });
     window.setTimeout(
@@ -1671,7 +1673,6 @@ function GameBoard({
                 />
               )),
             )}
-            <em>3 ROW BUFFER</em>
           </div>
           <div className="board" role="grid" aria-label={`${player} 게임 보드`}>
             {visibleRendered.flatMap((row, visibleY) => {
@@ -1767,7 +1768,9 @@ function GameBoard({
                           "--particle-origin-x": `${originX}%`,
                           "--particle-origin-y": `${Math.max(
                             0,
-                            ((originRow + 0.5) / HEIGHT) * 100,
+                            ((originRow + 0.5 - BUFFER_ROWS) /
+                              VISIBLE_HEIGHT) *
+                              100,
                           )}%`,
                           "--particle-x": `${Math.cos(angle) * distance}px`,
                           "--particle-y": `${Math.sin(angle) * distance}px`,
@@ -4522,7 +4525,7 @@ function OnlineParty({
             <div className="countdown-stage" aria-live="assertive">
               <div className="countdown-board" aria-hidden="true">
                 {Array.from(
-                  { length: HEIGHT * WIDTH },
+                  { length: VISIBLE_HEIGHT * WIDTH },
                   (_, index) => (
                   <i key={index} />
                   ),
