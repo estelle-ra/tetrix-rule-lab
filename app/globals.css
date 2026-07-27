@@ -829,6 +829,46 @@ input:focus-visible {
   grid-template-rows: repeat(20, var(--cell));
 }
 
+.buffer-zone {
+  background: rgba(9, 12, 16, 0.88);
+  border: 1px solid rgba(255, 111, 57, 0.35);
+  bottom: calc(100% + 8px);
+  display: grid;
+  grid-template-columns: repeat(10, var(--cell));
+  grid-template-rows: repeat(3, var(--cell));
+  left: 3px;
+  opacity: 0;
+  pointer-events: none;
+  position: absolute;
+  transform: translateY(8px);
+  transition:
+    opacity 180ms ease,
+    transform 180ms ease;
+  visibility: hidden;
+  z-index: 5;
+}
+
+.buffer-zone-visible {
+  opacity: 0.46;
+  transform: translateY(0);
+  visibility: visible;
+}
+
+.buffer-zone em {
+  bottom: 100%;
+  color: var(--orange);
+  font: normal 8px monospace;
+  left: -1px;
+  letter-spacing: 0.08em;
+  padding-bottom: 3px;
+  position: absolute;
+}
+
+.buffer-zone .cell {
+  background: rgba(255, 255, 255, 0.02);
+  border-color: rgba(255, 255, 255, 0.05);
+}
+
 .cell {
   background: rgba(255, 255, 255, 0.012);
   border: 1px solid rgba(255, 255, 255, 0.025);
@@ -1927,8 +1967,9 @@ button.online-choice:hover {
 .online-arena {
   align-items: start;
   display: grid;
-  gap: clamp(30px, 5vw, 80px);
-  grid-template-columns: minmax(470px, auto) 1fr;
+  gap: clamp(20px, 3vw, 52px);
+  grid-template-columns: minmax(470px, max-content) minmax(180px, 360px);
+  justify-content: center;
 }
 
 .countdown-stage {
@@ -2002,8 +2043,10 @@ button.online-choice:hover {
 
 .opponents-zone {
   border-left: 1px solid #2b3037;
+  max-width: 360px;
   min-width: 0;
   padding-left: 24px;
+  width: 100%;
 }
 
 .opponents-title {
@@ -2030,6 +2073,10 @@ button.online-choice:hover {
   display: grid;
   gap: 10px;
   grid-template-columns: repeat(auto-fit, minmax(112px, 1fr));
+}
+
+.opponents-grid .remote-player:only-child {
+  max-width: 180px;
 }
 
 .opponents-zone .party-chat {
@@ -3675,6 +3722,39 @@ input[type="range"] {
   background: rgba(49, 87, 245, 0.09);
 }
 
+.matchup-list {
+  border: 1px solid #c8c6c0;
+}
+
+.matchup-list > div {
+  align-items: center;
+  border-bottom: 1px solid #dedcd7;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(100px, 1fr) auto minmax(92px, auto);
+  min-height: 50px;
+  padding: 7px 12px;
+}
+
+.matchup-list > div:last-child {
+  border-bottom: 0;
+}
+
+.matchup-list strong {
+  font-size: 13px;
+}
+
+.matchup-list span {
+  color: #4f5862;
+  font: 800 11px monospace;
+}
+
+.matchup-list em {
+  color: #3157f5;
+  font: normal 10px monospace;
+  text-align: right;
+}
+
 .profile-empty {
   color: #7b8188;
   font: 11px/1.5 monospace;
@@ -3854,6 +3934,21 @@ footer {
 
   .lobby-code-panel strong {
     margin: 0;
+  }
+}
+
+@media (min-width: 761px) and (max-width: 1050px) {
+  .screen-multiplayer-playing .online-arena {
+    gap: 18px;
+    grid-template-columns: minmax(430px, max-content) minmax(170px, 280px);
+    justify-content: center;
+  }
+
+  .screen-multiplayer-playing .opponents-zone {
+    border-left: 1px solid #2b3037;
+    border-top: 0;
+    max-width: 280px;
+    padding: 0 0 0 16px;
   }
 }
 
@@ -4346,6 +4441,7 @@ footer {
   .online-spectating .opponents-zone {
     display: block;
     border-top: 0;
+    max-width: none;
     padding: 0 7px calc(18px + env(safe-area-inset-bottom));
   }
 

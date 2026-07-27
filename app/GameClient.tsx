@@ -88,6 +88,8 @@ type GameResult = {
   timeMs: number;
   lines: number;
   won: boolean;
+  matchKey?: string;
+  headToHead?: Array<{ opponentId: string; won: boolean }>;
 };
 
 type PersonalBestResult = {
@@ -99,6 +101,7 @@ type PersonalBestResult = {
 
 type RoomPlayer = {
   id: string;
+  userId?: string;
   name: string;
   slot: number;
   alive: boolean;
@@ -131,7 +134,7 @@ type ChatMessage = {
 };
 
 type RoomPacket =
-  | { type: "join-request"; name: string }
+  | { type: "join-request"; name: string; userId?: string }
   | {
       type: "welcome";
       selfId: string;
@@ -193,8 +196,23 @@ type RealtimeSnapshotEnvelope = {
   snapshot: GameSnapshot;
 };
 
+function rankRoomPlayers(players: RoomPlayer[], winnerId: string) {
+  return players
+    .filter((player) => !player.spectating)
+    .sort((a, b) => {
+      if (a.id === winnerId) return -1;
+      if (b.id === winnerId) return 1;
+      const eliminationDifference =
+        (b.eliminatedAt ?? 0) - (a.eliminatedAt ?? 0);
+      if (eliminationDifference !== 0) return eliminationDifference;
+      return (b.snapshot?.score ?? 0) - (a.snapshot?.score ?? 0);
+    });
+}
+
 const WIDTH = 10;
-const HEIGHT = 20;
+const VISIBLE_HEIGHT = 20;
+const BUFFER_ROWS = 3;
+const HEIGHT = VISIBLE_HEIGHT + BUFFER_ROWS;
 const LOCK_DELAY_MS = 350;
 const MAX_LOCK_RESETS = 8;
 const MAX_GROUNDED_MS = 1800;
@@ -668,11 +686,14 @@ function GameBoard({
   const lastGarbageAtRef = useRef(0);
   const joystickPointer = useRef<number | null>(null);
   const joystickDirection = useRef<GameAction | null>(null);
-  const joystickOriginRef = useRef({ x: 0, y: 0 });
+  const joystickInputOriginRef = useRef({ x: 0, y: 0 });
+  const joystickArmedAtRef = useRef(0);
+  const garbageAppliedTotalRef = useRef(0);
   const piecesPlacedRef = useRef(0);
   const speedTimerRef = useRef<number | null>(null);
   const spinTimerRef = useRef<number | null>(null);
   const boardRef = useRef(board);
+  const activeRef = useRef(active);
 
   useEffect(() => {
     startedAt.current = Date.now();
@@ -681,6 +702,10 @@ function GameBoard({
   useEffect(() => {
     boardRef.current = board;
   }, [board]);
+
+  useEffect(() => {
+    activeRef.current = active;
+  }, [active]);
 
   useEffect(() => {
     if (mode !== "versus" || !matchOutcome) return;
@@ -793,6 +818,8 @@ function GameBoard({
             ? (miniTSpinScores[cleared] ?? 600)
             : (baseScores[cleared] ?? 1200);
 
+      boardRef.current = cleaned;
+      activeRef.current = nextPiece;
       setBoard(cleaned);
       setBoardItems(remainingItems);
       setActive(nextPiece);
@@ -892,7 +919,10 @@ function GameBoard({
   const stepDown = useCallback(() => {
     if (status !== "playing") return;
     const moved = { ...active, y: active.y + 1 };
-    if (!collides(board, moved)) setActive(moved);
+    if (!collides(board, moved)) {
+      activeRef.current = moved;
+      setActive(moved);
+    }
   }, [active, board, status]);
 
   useEffect(() => {
@@ -905,10 +935,17 @@ function GameBoard({
       90,
       rules.gravity - Math.floor(lines / 10) * 55,
     );
-    const gravity = speedActive ? Math.max(55, normalGravity * 0.24) : normalGravity;
+    const enteringFromBuffer = pieceCells(active).every(
+      ([, y]) => y < BUFFER_ROWS,
+    );
+    const gravity = enteringFromBuffer
+      ? 70
+      : speedActive
+        ? Math.max(55, normalGravity * 0.24)
+        : normalGravity;
     const timer = window.setInterval(() => stepDownRef.current(), gravity);
     return () => window.clearInterval(timer);
-  }, [lines, rules.gravity, speedActive, status]);
+  }, [active, lines, rules.gravity, speedActive, status]);
 
   useEffect(() => {
     if (status !== "playing") return;
@@ -966,34 +1003,57 @@ function GameBoard({
   }, [lines, mode, onResult, score, status]);
 
   useEffect(() => {
-    if (!garbage?.amount || status !== "playing") return;
+    if (!garbage?.amount) {
+      garbageAppliedTotalRef.current = 0;
+      return;
+    }
+    if (status !== "playing") return;
+    const pendingAmount = Math.max(
+      0,
+      garbage.amount - garbageAppliedTotalRef.current,
+    );
+    if (!pendingAmount) return;
+    garbageAppliedTotalRef.current = garbage.amount;
     lastGarbageAtRef.current = Date.now();
     let clearTimer: number | undefined;
     const applyTimer = window.setTimeout(() => {
-      setBoard((current) => {
-        const amount = Math.min(garbage.amount, 8);
-        const hole = Math.floor(Math.random() * WIDTH);
-        const shifted = current.slice(amount);
-        for (let row = 0; row < amount; row += 1) {
-          shifted.push(
-            Array.from({ length: WIDTH }, (_, x) => (x === hole ? null : "G")),
-          );
-        }
-        return shifted;
-      });
+      const amount = Math.min(pendingAmount, VISIBLE_HEIGHT);
+      const hole = Math.floor(Math.random() * WIDTH);
+      const currentBoard = boardRef.current;
+      const overflowedRows = currentBoard
+        .slice(0, amount)
+        .some((row) => row.some(Boolean));
+      const shifted = currentBoard.slice(amount);
+      for (let row = 0; row < amount; row += 1) {
+        shifted.push(
+          Array.from({ length: WIDTH }, (_, x) => (x === hole ? null : "G")),
+        );
+      }
+      const liftedActive = {
+        ...activeRef.current,
+        y: activeRef.current.y - amount,
+      };
+      const activeOverflow = pieceCells(liftedActive).some(([, y]) => y < 0);
+      boardRef.current = shifted;
+      activeRef.current = liftedActive;
+      setBoard(shifted);
+      setActive(liftedActive);
       setBoardItems((current) =>
         current
-          .map((marker) => ({ ...marker, y: marker.y - Math.min(garbage.amount, 8) }))
+          .map((marker) => ({ ...marker, y: marker.y - amount }))
           .filter((marker) => marker.y >= 0),
       );
-      setFlash(`+${garbage.amount} GARBAGE`);
+      setFlash(`+${pendingAmount} GARBAGE`);
       clearTimer = window.setTimeout(() => setFlash(""), 620);
+      if (overflowedRows || activeOverflow) {
+        finish("lost", "garbage");
+      }
     }, 0);
     return () => {
       window.clearTimeout(applyTimer);
       if (clearTimer) window.clearTimeout(clearTimer);
     };
-  }, [garbage, status]);
+  }, [finish, garbage, status]);
 
   useEffect(() => {
     if (!itemEffect?.id || status !== "playing") return;
@@ -1083,6 +1143,7 @@ function GameBoard({
         refreshLockDelay();
         lastActionWasRotation.current = false;
         lastRotationKickIndex.current = -1;
+        activeRef.current = moved;
         setActive(moved);
       }
     },
@@ -1116,6 +1177,7 @@ function GameBoard({
           refreshLockDelay();
           lastActionWasRotation.current = true;
           lastRotationKickIndex.current = index;
+          activeRef.current = candidate;
           setActive(candidate);
           return;
         }
@@ -1150,7 +1212,10 @@ function GameBoard({
     setImpactEffect({
       id: nextImpactId,
       x: ((minX + maxX + 1) / 2 / WIDTH) * 100,
-      y: ((bottomY + 1) / HEIGHT) * 100,
+      y:
+        ((Math.max(BUFFER_ROWS, bottomY + 1) - BUFFER_ROWS) /
+          VISIBLE_HEIGHT) *
+        100,
       piece: dropped.type,
     });
     window.setTimeout(
@@ -1172,11 +1237,15 @@ function GameBoard({
     lastRotationKickIndex.current = -1;
     if (held) {
       setHeld(active.type);
-      setActive(spawn(held));
+      const nextPiece = spawn(held);
+      activeRef.current = nextPiece;
+      setActive(nextPiece);
     } else {
       const replenished = nextQueue(queue, pieceRandomRef.current);
       setHeld(active.type);
-      setActive(spawn(replenished[0]));
+      const nextPiece = spawn(replenished[0]);
+      activeRef.current = nextPiece;
+      setActive(nextPiece);
       setQueue(replenished.slice(1));
     }
     setCanHold(false);
@@ -1338,14 +1407,17 @@ function GameBoard({
     if (joystickPointer.current !== event.pointerId) return;
     event.preventDefault();
     const rect = event.currentTarget.getBoundingClientRect();
-    const rawX = event.clientX - rect.left - joystickOriginRef.current.x;
-    const rawY = event.clientY - rect.top - joystickOriginRef.current.y;
+    const rawX =
+      event.clientX - rect.left - joystickInputOriginRef.current.x;
+    const rawY =
+      event.clientY - rect.top - joystickInputOriginRef.current.y;
     const distance = Math.hypot(rawX, rawY);
     const radius = 46;
     const scale = distance > radius ? radius / distance : 1;
     const x = rawX * scale;
     const y = rawY * scale;
     setJoystickVector({ x, y });
+    if (window.performance.now() < joystickArmedAtRef.current) return;
 
     let nextDirection: GameAction | null = null;
     if (distance >= JOYSTICK_DEADZONE) {
@@ -1373,14 +1445,21 @@ function GameBoard({
     stopAllRepeats();
     joystickDirection.current = null;
     const rect = event.currentTarget.getBoundingClientRect();
+    const touchOrigin = {
+      x: event.clientX - rect.left,
+      y: event.clientY - rect.top,
+    };
     const margin = 58;
-    const origin = {
-      x: Math.max(margin, Math.min(rect.width - margin, event.clientX - rect.left)),
-      y: Math.max(margin, Math.min(rect.height - margin, event.clientY - rect.top)),
+    const visualOrigin = {
+      x: Math.max(margin, Math.min(rect.width - margin, touchOrigin.x)),
+      y: Math.max(margin, Math.min(rect.height - margin, touchOrigin.y)),
     };
     joystickPointer.current = event.pointerId;
-    joystickOriginRef.current = origin;
-    setJoystickOrigin(origin);
+    joystickInputOriginRef.current = touchOrigin;
+    // Ignore the settling movement emitted by some mobile browsers immediately
+    // after switching from a one-tap arrow to the joystick.
+    joystickArmedAtRef.current = window.performance.now() + 70;
+    setJoystickOrigin(visualOrigin);
     setJoystickActive(true);
     setJoystickVector({ x: 0, y: 0 });
     event.currentTarget.setPointerCapture(event.pointerId);
@@ -1431,6 +1510,17 @@ function GameBoard({
     }
     return cells;
   }, [active, board, rules.ghost, status]);
+  const visibleRendered = useMemo(
+    () => rendered.slice(BUFFER_ROWS),
+    [rendered],
+  );
+  const bufferDanger = useMemo(
+    () =>
+      board
+        .slice(0, BUFFER_ROWS + 3)
+        .some((row) => row.some(Boolean)),
+    [board],
+  );
 
   useEffect(() => {
     onSnapshotRef.current = onSnapshot;
@@ -1447,14 +1537,20 @@ function GameBoard({
     const timer = window.setTimeout(() => {
       snapshotSentAt.current = Date.now();
       snapshotCallback({
-        cells: rendered.flat(),
+        cells: visibleRendered.flat(),
         lines,
         score,
         status,
-        items: Array.from(itemRenderMap.entries()).map(([position, item]) => {
-          const [x, y] = position.split(":").map(Number);
-          return { index: y * WIDTH + x, item };
-        }),
+        items: Array.from(itemRenderMap.entries())
+          .map(([position, item]) => {
+            const [x, y] = position.split(":").map(Number);
+            return { x, y, item };
+          })
+          .filter(({ y }) => y >= BUFFER_ROWS)
+          .map(({ x, y, item }) => ({
+            index: (y - BUFFER_ROWS) * WIDTH + x,
+            item,
+          })),
         effect: speedActive ? "speed" : spinLocked ? "spin" : null,
       });
     }, delay);
@@ -1462,12 +1558,12 @@ function GameBoard({
   }, [
     itemRenderMap,
     lines,
-    rendered,
     score,
     snapshotIntervalMs,
     speedActive,
     spinLocked,
     status,
+    visibleRendered,
   ]);
 
   const controlLabel = "←/→ 이동 · ↑/Z 회전 · Space 드롭 · Shift 홀드";
@@ -1505,25 +1601,40 @@ function GameBoard({
         </aside>
 
         <div className={`board-shell ${impactEffect ? "board-impact" : ""}`}>
-          <div className="board" role="grid" aria-label={`${player} 게임 보드`}>
-            {rendered.flatMap((row, y) =>
+          <div
+            aria-hidden="true"
+            className={`buffer-zone ${bufferDanger ? "buffer-zone-visible" : ""}`}
+          >
+            {rendered.slice(0, BUFFER_ROWS).flatMap((row, y) =>
               row.map((cell, x) => (
                 <span
+                  className={`cell ${cell ? `piece-${cell}` : ""}`}
+                  key={`buffer-${x}-${y}`}
+                />
+              )),
+            )}
+            <em>3 ROW BUFFER</em>
+          </div>
+          <div className="board" role="grid" aria-label={`${player} 게임 보드`}>
+            {visibleRendered.flatMap((row, visibleY) => {
+              const boardY = visibleY + BUFFER_ROWS;
+              return row.map((cell, x) => (
+                <span
                   className={`cell ${cell ? `piece-${cell}` : ""} ${
-                    itemRenderMap.has(`${x}:${y}`)
-                      ? `item-cell item-${itemRenderMap.get(`${x}:${y}`)}`
+                    itemRenderMap.has(`${x}:${boardY}`)
+                      ? `item-cell item-${itemRenderMap.get(`${x}:${boardY}`)}`
                       : ""
                   }`}
-                  key={`${x}-${y}`}
+                  key={`${x}-${boardY}`}
                 >
-                  {itemRenderMap.has(`${x}:${y}`) && (
+                  {itemRenderMap.has(`${x}:${boardY}`) && (
                     <b aria-hidden="true">
-                      {ITEM_META[itemRenderMap.get(`${x}:${y}`)!].icon}
+                      {ITEM_META[itemRenderMap.get(`${x}:${boardY}`)!].icon}
                     </b>
                   )}
                 </span>
-              )),
-            )}
+              ));
+            })}
           </div>
           {flash && (
             <div
@@ -1596,7 +1707,12 @@ function GameBoard({
                       style={
                         {
                           "--particle-origin-x": `${originX}%`,
-                          "--particle-origin-y": `${((originRow + 0.5) / HEIGHT) * 100}%`,
+                          "--particle-origin-y": `${Math.max(
+                            0,
+                            ((originRow - BUFFER_ROWS + 0.5) /
+                              VISIBLE_HEIGHT) *
+                              100,
+                          )}%`,
                           "--particle-x": `${Math.cos(angle) * distance}px`,
                           "--particle-y": `${Math.sin(angle) * distance}px`,
                           "--particle-delay": `${(index % 6) * 16}ms`,
@@ -1950,7 +2066,8 @@ function RemoteBoard({
   onSelect?: () => void;
   onItem?: () => void;
 }) {
-  const cells = player.snapshot?.cells ?? Array(HEIGHT * WIDTH).fill("");
+  const cells =
+    player.snapshot?.cells ?? Array(VISIBLE_HEIGHT * WIDTH).fill("");
   const itemCells = new Map(
     (player.snapshot?.items ?? []).map((marker) => [marker.index, marker.item]),
   );
@@ -1986,7 +2103,7 @@ function RemoteBoard({
       </div>
       <div className="remote-board-wrap">
         <div className="remote-board" aria-label={`${player.name} 상대 보드`}>
-          {cells.slice(0, HEIGHT * WIDTH).map((cell, index) => {
+          {cells.slice(0, VISIBLE_HEIGHT * WIDTH).map((cell, index) => {
             const item = itemCells.get(index);
             return (
               <i
@@ -2045,6 +2162,7 @@ function RemoteBoard({
 function OnlineParty({
   rules,
   defaultPlayerName,
+  playerUserId,
   initialRoomCode,
   canAutoJoin,
   mobileControlLayout,
@@ -2053,6 +2171,7 @@ function OnlineParty({
 }: {
   rules: Rules;
   defaultPlayerName: string;
+  playerUserId?: string;
   initialRoomCode: string;
   canAutoJoin: boolean;
   mobileControlLayout: MobileControlLayout;
@@ -2110,6 +2229,7 @@ function OnlineParty({
   >(new Map());
   const realtimeSnapshotBatchTimerRef = useRef<number | null>(null);
   const realtimeHostIdRef = useRef("");
+  const presenceDepartureTimersRef = useRef<Map<string, number>>(new Map());
   const roomCodeRef = useRef("");
   const hostConnectionRef = useRef<DataConnection | null>(null);
   const connectionsRef = useRef<Map<string, DataConnection>>(new Map());
@@ -2267,6 +2387,14 @@ function OnlineParty({
   const replacePlayers = (next: RoomPlayer[]) => {
     playersRef.current = next;
     setPlayers(next);
+  };
+
+  const enqueueGarbage = (amount: number) => {
+    if (!Number.isFinite(amount) || amount <= 0) return;
+    setGarbageSignal((current) => ({
+      id: current.id + 1,
+      amount: current.amount + Math.round(amount),
+    }));
   };
 
   const replaceItemInventory = useCallback((next: ItemType[]) => {
@@ -2519,6 +2647,24 @@ function OnlineParty({
       (player) => player.id === localIdRef.current,
     );
     if (!localPlayer || localPlayer.spectating) return;
+    const standings = rankRoomPlayers(finalPlayers, winnerId);
+    const localRank = standings.findIndex(
+      (player) => player.id === localPlayer.id,
+    );
+    const headToHead =
+      localRank < 0 || !localPlayer.userId
+        ? []
+        : standings
+            .map((player, rank) => ({ player, rank }))
+            .filter(
+              ({ player }) =>
+                Boolean(player.userId) &&
+                player.userId !== localPlayer.userId,
+            )
+            .map(({ player, rank }) => ({
+              opponentId: player.userId!,
+              won: localRank < rank,
+            }));
     resultMatchIdRef.current = activeMatchId;
     onMatchResult({
       mode: "versus",
@@ -2526,6 +2672,8 @@ function OnlineParty({
       timeMs: Math.max(1, Date.now() - activeMatchId),
       lines: localPlayer.snapshot?.lines ?? 0,
       won: localPlayer.id === winnerId,
+      matchKey: `${roomCodeRef.current}:${activeMatchId}`,
+      headToHead,
     });
   };
 
@@ -2609,7 +2757,7 @@ function OnlineParty({
         amount,
       };
       if (target.id === localIdRef.current) {
-        setGarbageSignal({ id: packet.id, amount });
+        enqueueGarbage(amount);
       } else if (realtimeChannelRef.current) {
         sendRealtimePacket(packet, target.id);
       } else {
@@ -2743,6 +2891,7 @@ function OnlineParty({
         ...playersRef.current,
         {
           id: senderId,
+          userId: packet.userId,
           name: cleanPlayerName(packet.name),
           slot,
           alive: !joiningAsSpectator,
@@ -2858,11 +3007,15 @@ function OnlineParty({
         (index) => !occupied.has(index),
       );
       if (slot === undefined) return;
-      const metadata = (connection.metadata ?? {}) as { name?: string };
+      const metadata = (connection.metadata ?? {}) as {
+        name?: string;
+        userId?: string;
+      };
       const next = [
         ...playersRef.current,
         {
           id: connection.peer,
+          userId: metadata.userId,
           name: cleanPlayerName(metadata.name ?? "PLAYER"),
           slot,
           alive: true,
@@ -2935,6 +3088,7 @@ function OnlineParty({
         setHostId(id);
         const host: RoomPlayer = {
           id,
+          userId: playerUserId,
           name: cleanPlayerName(playerName),
           slot: 0,
           alive: true,
@@ -3024,7 +3178,7 @@ function OnlineParty({
       replacePlayers(next);
     }
     if (packet.type === "garbage") {
-      setGarbageSignal({ id: packet.id, amount: packet.amount });
+      enqueueGarbage(packet.amount);
     }
     if (packet.type === "ink") {
       setInkSignal({ id: packet.id });
@@ -3151,7 +3305,10 @@ function OnlineParty({
         if (connectionAttemptRef.current !== attempt) return;
         setConnectionStatus("호스트의 방 정보를 불러오고 있습니다.");
         const connection = peer.connect(roomPeerId(code), {
-          metadata: { name: cleanPlayerName(requestedName) },
+          metadata: {
+            name: cleanPlayerName(requestedName),
+            userId: playerUserId,
+          },
           serialization: "json",
           reliable: true,
         });
@@ -3207,13 +3364,21 @@ function OnlineParty({
       }
       return;
     }
-    if (roleRef.current === "host") {
-      handleHostPacket(envelope.senderId, envelope.packet);
-      return;
-    }
     if (envelope.packet.type === "welcome") {
       realtimeHostIdRef.current = envelope.senderId;
       setHostId(envelope.senderId);
+      if (envelope.senderId !== localId) {
+        roleRef.current = "guest";
+        setRole("guest");
+        removeRealtimeSnapshotTransport();
+        ensureRealtimeSnapshotUplink(roomCodeRef.current, localId);
+      }
+      handleGuestPacket(envelope.packet);
+      return;
+    }
+    if (roleRef.current === "host") {
+      handleHostPacket(envelope.senderId, envelope.packet);
+      return;
     }
     if (
       realtimeHostIdRef.current &&
@@ -3226,6 +3391,10 @@ function OnlineParty({
 
   const removeRealtimeChannel = () => {
     removeRealtimeSnapshotTransport();
+    presenceDepartureTimersRef.current.forEach((timer) =>
+      window.clearTimeout(timer),
+    );
+    presenceDepartureTimersRef.current.clear();
     const channel = realtimeChannelRef.current;
     realtimeChannelRef.current = null;
     realtimeHostIdRef.current = "";
@@ -3243,7 +3412,7 @@ function OnlineParty({
     setPhase("entry");
   };
 
-  const handleRealtimePresenceLeave = (
+  const finalizeRealtimePresenceLeave = (
     departedId: string,
     attempt: number,
   ) => {
@@ -3289,6 +3458,31 @@ function OnlineParty({
     concludeIfNeeded(nextPlayers);
   };
 
+  const cancelRealtimePresenceLeave = (
+    playerId: string,
+    attempt: number,
+  ) => {
+    if (connectionAttemptRef.current !== attempt) return;
+    const timer = presenceDepartureTimersRef.current.get(playerId);
+    if (timer === undefined) return;
+    window.clearTimeout(timer);
+    presenceDepartureTimersRef.current.delete(playerId);
+  };
+
+  const scheduleRealtimePresenceLeave = (
+    playerId: string,
+    attempt: number,
+  ) => {
+    const existing = presenceDepartureTimersRef.current.get(playerId);
+    if (existing !== undefined) window.clearTimeout(existing);
+    const graceMs = phaseRef.current === "lobby" ? 20000 : 8000;
+    const timer = window.setTimeout(() => {
+      presenceDepartureTimersRef.current.delete(playerId);
+      finalizeRealtimePresenceLeave(playerId, attempt);
+    }, graceMs);
+    presenceDepartureTimersRef.current.set(playerId, timer);
+  };
+
   const createRealtimeRoom = async () => {
     if (!supabase) return createPeerRoom();
     clearConnectionTimeout();
@@ -3314,37 +3508,56 @@ function OnlineParty({
         presence: { key: localId },
       },
     });
+    let subscribedOnce = false;
     realtimeChannelRef.current = channel;
     channel
       .on("broadcast", { event: "room" }, receiveRealtimeMessage)
+      .on("presence", { event: "join" }, ({ key }) => {
+        cancelRealtimePresenceLeave(key, attempt);
+      })
       .on("presence", { event: "leave" }, ({ key }) => {
-        handleRealtimePresenceLeave(key, attempt);
+        scheduleRealtimePresenceLeave(key, attempt);
       })
       .subscribe((status) => {
         if (connectionAttemptRef.current !== attempt) return;
         if (status === "SUBSCRIBED") {
+          const reconnecting = subscribedOnce;
+          subscribedOnce = true;
           clearConnectionTimeout();
           const host: RoomPlayer = {
             id: localId,
+            userId: playerUserId,
             name: cleanPlayerName(playerName),
             slot: 0,
             alive: true,
             connected: true,
           };
-          replacePlayers([host]);
+          if (!reconnecting) replacePlayers([host]);
           setConnectionStatus("");
-          setPhase("lobby");
+          if (!reconnecting) setPhase("lobby");
           void channel.track({
             playerId: localId,
             name: host.name,
-            role: "host",
+            role: roleRef.current ?? "host",
+          }).then(() => {
+            if (reconnecting) {
+              sendRealtimePacket({
+                type: "join-request",
+                name: host.name,
+                userId: playerUserId,
+              });
+            }
           });
         }
         if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
-          failRealtimeConnection(
-            "실시간 방을 만들 수 없습니다. 잠시 후 다시 시도해 주세요.",
-            attempt,
-          );
+          if (!subscribedOnce) {
+            failRealtimeConnection(
+              "실시간 방을 만들 수 없습니다. 잠시 후 다시 시도해 주세요.",
+              attempt,
+            );
+          } else {
+            setConnectionStatus("연결을 복구하고 있습니다.");
+          }
         }
       });
     connectionTimeoutRef.current = window.setTimeout(() => {
@@ -3389,26 +3602,41 @@ function OnlineParty({
         presence: { key: localId },
       },
     });
+    let subscribedOnce = false;
     realtimeChannelRef.current = channel;
     channel
       .on("broadcast", { event: "room" }, receiveRealtimeMessage)
+      .on("presence", { event: "join" }, ({ key }) => {
+        cancelRealtimePresenceLeave(key, attempt);
+      })
       .on("presence", { event: "leave" }, ({ key }) => {
-        handleRealtimePresenceLeave(key, attempt);
+        scheduleRealtimePresenceLeave(key, attempt);
       })
       .subscribe((status) => {
         if (connectionAttemptRef.current !== attempt) return;
         if (status === "SUBSCRIBED") {
+          subscribedOnce = true;
           setConnectionStatus("호스트의 입장 승인을 기다리고 있습니다.");
           ensureRealtimeSnapshotUplink(code, localId);
           void channel
             .track({ playerId: localId, name, role: "guest" })
-            .then(() => sendRealtimePacket({ type: "join-request", name }));
+            .then(() =>
+              sendRealtimePacket({
+                type: "join-request",
+                name,
+                userId: playerUserId,
+              }),
+            );
         }
         if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
-          failRealtimeConnection(
-            "실시간 방에 연결할 수 없습니다. 네트워크를 확인해 주세요.",
-            attempt,
-          );
+          if (!subscribedOnce) {
+            failRealtimeConnection(
+              "실시간 방에 연결할 수 없습니다. 네트워크를 확인해 주세요.",
+              attempt,
+            );
+          } else {
+            setConnectionStatus("연결을 복구하고 있습니다.");
+          }
         }
       });
     connectionTimeoutRef.current = window.setTimeout(() => {
@@ -3799,16 +4027,7 @@ function OnlineParty({
     (player) => player.alive && player.connected,
   ).length;
   const standings =
-    phase === "ended"
-      ? players.filter((player) => !player.spectating).sort((a, b) => {
-          if (a.id === winnerId) return -1;
-          if (b.id === winnerId) return 1;
-          const eliminationDifference =
-            (b.eliminatedAt ?? 0) - (a.eliminatedAt ?? 0);
-          if (eliminationDifference !== 0) return eliminationDifference;
-          return (b.snapshot?.score ?? 0) - (a.snapshot?.score ?? 0);
-        })
-      : [];
+    phase === "ended" ? rankRoomPlayers(players, winnerId) : [];
   const inviteCode = initialRoomCode
     .toUpperCase()
     .replace(/[^A-Z0-9]/g, "")
@@ -4228,9 +4447,12 @@ function OnlineParty({
           {phase === "countdown" ? (
             <div className="countdown-stage" aria-live="assertive">
               <div className="countdown-board" aria-hidden="true">
-                {Array.from({ length: HEIGHT * WIDTH }, (_, index) => (
+                {Array.from(
+                  { length: VISIBLE_HEIGHT * WIDTH },
+                  (_, index) => (
                   <i key={index} />
-                ))}
+                  ),
+                )}
               </div>
               <div className="match-countdown">
                 <span>GET READY</span>
@@ -5048,6 +5270,25 @@ export default function GameClient() {
   const saveGameResult = useCallback(
     async (result: GameResult) => {
       if (!supabase || !identity?.userId || identity.guest) return;
+      if (
+        result.mode === "versus" &&
+        result.matchKey &&
+        result.headToHead?.length
+      ) {
+        const { error: matchupError } = await supabase.rpc(
+          "submit_head_to_head",
+          {
+            p_match_key: result.matchKey,
+            p_results: result.headToHead.map(({ opponentId, won }) => ({
+              opponent_id: opponentId,
+              won,
+            })),
+          },
+        );
+        if (matchupError) {
+          console.warn("HEAD_TO_HEAD_SAVE_FAILED", matchupError.code);
+        }
+      }
       const { data, error } = await supabase.rpc("submit_game_result", {
         p_mode: result.mode,
         p_score: Math.max(0, Math.round(result.score)),
@@ -5333,6 +5574,9 @@ export default function GameClient() {
             <OnlineParty
               rules={rules}
               defaultPlayerName={identity?.username ?? "PLAYER"}
+              playerUserId={
+                identity?.guest ? undefined : identity?.userId
+              }
               initialRoomCode={inviteRoomCode}
               canAutoJoin={identityReady && Boolean(identity)}
               mobileControlLayout={

@@ -65,6 +65,7 @@ test("ships without starter-only assets", async () => {
     directoryGrantMigration,
     socialMigration,
     personalBestMigration,
+    headToHeadMigration,
     usernameAuth,
     icon,
   ] =
@@ -114,6 +115,13 @@ test("ships without starter-only assets", async () => {
       ),
       readFile(
         new URL(
+          "../supabase/migrations/20260727120000_head_to_head_records.sql",
+          import.meta.url,
+        ),
+        "utf8",
+      ),
+      readFile(
+        new URL(
           "../supabase/functions/username-auth/index.ts",
           import.meta.url,
         ),
@@ -152,7 +160,10 @@ test("ships without starter-only assets", async () => {
   assert.match(gameClient, /tetstar-room-\$\{code\.toLowerCase\(\)\}/);
   assert.match(gameClient, /type: "join-request"/);
   assert.match(gameClient, /type: "host-transfer"/);
-  assert.match(gameClient, /handleRealtimePresenceLeave/);
+  assert.match(gameClient, /scheduleRealtimePresenceLeave/);
+  assert.match(gameClient, /finalizeRealtimePresenceLeave/);
+  assert.match(gameClient, /phaseRef\.current === "lobby" \? 20000 : 8000/);
+  assert.match(gameClient, /let subscribedOnce = false/);
   assert.match(gameClient, /player\.id === hostId/);
   assert.match(gameClient, /type: "attack-log"/);
   assert.match(gameClient, /targetMode: "cycle"/);
@@ -251,6 +262,19 @@ test("ships without starter-only assets", async () => {
   assert.match(gameClient, /JOYSTICK_HORIZONTAL_DAS_MS = 165/);
   assert.match(gameClient, /JOYSTICK_HORIZONTAL_ARR_MS = 66/);
   assert.match(gameClient, /JOYSTICK_DEADZONE = 22/);
+  assert.match(gameClient, /joystickInputOriginRef/);
+  assert.match(gameClient, /joystickArmedAtRef/);
+  assert.match(gameClient, /const touchOrigin/);
+  assert.match(gameClient, /const visualOrigin/);
+  assert.match(gameClient, /window\.performance\.now\(\) \+ 70/);
+  assert.match(gameClient, /const BUFFER_ROWS = 3/);
+  assert.match(gameClient, /const VISIBLE_HEIGHT = 20/);
+  assert.match(gameClient, /visibleRendered/);
+  assert.match(gameClient, /className=\{`buffer-zone/);
+  assert.match(gameClient, /const enqueueGarbage/);
+  assert.match(gameClient, /garbageAppliedTotalRef/);
+  assert.match(gameClient, /const liftedActive/);
+  assert.match(gameClient, /const overflowedRows/);
   assert.match(gameClient, /REALTIME READY/);
   assert.match(gameClient, /SUPABASE REALTIME/);
   assert.match(gameClient, /REALTIME_SNAPSHOT_UPLINK_MS = 400/);
@@ -276,6 +300,12 @@ test("ships without starter-only assets", async () => {
   assert.match(globalCss, /\.winner-reveal/);
   assert.match(globalCss, /\.touch-direction/);
   assert.match(globalCss, /\.control-layout-options/);
+  assert.match(globalCss, /\.buffer-zone/);
+  assert.match(globalCss, /\.matchup-list/);
+  assert.match(
+    globalCss,
+    /\.opponents-grid \.remote-player:only-child[\s\S]*max-width: 180px/,
+  );
   assert.match(globalCss, /\.rules-personal-control/);
   assert.match(globalCss, /\.rules-control-options/);
   assert.match(globalCss, /\.rules-item-settings/);
@@ -308,7 +338,7 @@ test("ships without starter-only assets", async () => {
   assert.match(gameClient, /lastRotationKickIndex/);
   assert.match(gameClient, /T-SPIN MINI/);
   assert.match(gameClient, /event\.currentTarget\.blur\(\)/);
-  assert.match(gameClient, /players\.filter\(\(player\) => !player\.spectating\)/);
+  assert.match(gameClient, /\.filter\(\(player\) => !player\.spectating\)/);
   assert.match(gameClient, /startAt: number/);
   assert.match(gameClient, /beginCountdown\(startAt\)/);
   assert.match(gameClient, /className="match-countdown"/);
@@ -359,6 +389,10 @@ test("ships without starter-only assets", async () => {
   assert.match(profileDashboard, /MOBILE CONTROLS/);
   assert.match(profileDashboard, /mobile_control_layout/);
   assert.match(profileDashboard, /친구 기록 랭킹/);
+  assert.match(profileDashboard, /친구 맞대결 전적/);
+  assert.match(profileDashboard, /head_to_head_records/);
+  assert.match(gameClient, /submit_head_to_head/);
+  assert.match(gameClient, /headToHead/);
   assert.match(migration, /alter table public\.profiles enable row level security/);
   assert.match(migration, /is_username_available/);
   assert.match(writeLockMigration, /revoke update on public\.profiles/);
@@ -378,6 +412,15 @@ test("ships without starter-only assets", async () => {
   assert.match(socialMigration, /create or replace function public\.record_game_result/);
   assert.match(socialMigration, /security definer/);
   assert.match(socialMigration, /participants read friendships/);
+  assert.match(
+    headToHeadMigration,
+    /create table if not exists public\.head_to_head_records/,
+  );
+  assert.match(
+    headToHeadMigration,
+    /create or replace function public\.submit_head_to_head/,
+  );
+  assert.match(headToHeadMigration, /on conflict do nothing/);
   assert.match(socialMigration, /records readable by player or friends/);
   assert.match(
     personalBestMigration,

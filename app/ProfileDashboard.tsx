@@ -32,6 +32,15 @@ type FriendshipRow = {
   status: "pending" | "accepted";
 };
 
+type HeadToHeadRow = {
+  user_id: string;
+  opponent_id: string;
+  games_played: number;
+  wins: number;
+  losses: number;
+  last_played_at: string;
+};
+
 const MODES: Mode[] = ["sprint", "blitz", "zen", "versus"];
 const MODE_LABELS: Record<Mode, string> = {
   sprint: "40 LINES",
@@ -92,6 +101,7 @@ export default function ProfileDashboard({
   const [relations, setRelations] = useState<FriendshipRow[]>([]);
   const [people, setPeople] = useState<ProfileRow[]>([]);
   const [friendRecords, setFriendRecords] = useState<RecordRow[]>([]);
+  const [matchups, setMatchups] = useState<HeadToHeadRow[]>([]);
   const [search, setSearch] = useState("");
   const [searchResults, setSearchResults] = useState<ProfileRow[]>([]);
   const [leaderboardMode, setLeaderboardMode] = useState<Mode>("sprint");
@@ -139,7 +149,7 @@ export default function ProfileDashboard({
         ),
       ]),
     );
-    const [peopleResult, friendRecordResult] = await Promise.all([
+    const [peopleResult, friendRecordResult, matchupResult] = await Promise.all([
       supabase
         .from("profiles")
         .select("id, username, username_normalized, level, experience")
@@ -150,10 +160,20 @@ export default function ProfileDashboard({
           "user_id, mode, best_score, best_time_ms, best_lines, wins, games_played",
         )
         .in("user_id", memberIds),
+      supabase
+        .from("head_to_head_records")
+        .select(
+          "user_id, opponent_id, games_played, wins, losses, last_played_at",
+        )
+        .eq("user_id", userId),
     ]);
 
     if (peopleResult.error || friendRecordResult.error) {
-      setError(friendlyError(peopleResult.error ?? friendRecordResult.error));
+      setError(
+        friendlyError(
+          peopleResult.error ?? friendRecordResult.error,
+        ),
+      );
       setLoading(false);
       return;
     }
@@ -163,6 +183,12 @@ export default function ProfileDashboard({
     setRelations(nextRelations);
     setPeople((peopleResult.data ?? []) as ProfileRow[]);
     setFriendRecords((friendRecordResult.data ?? []) as RecordRow[]);
+    // Keep older deployments usable until the head-to-head migration lands.
+    setMatchups(
+      matchupResult.error
+        ? []
+        : ((matchupResult.data ?? []) as HeadToHeadRow[]),
+    );
     setLoading(false);
   }, [userId]);
 
@@ -228,6 +254,31 @@ export default function ProfileDashboard({
       return right.best_score - left.best_score;
     });
   }, [friendRecords, friendIdSet, leaderboardMode, people]);
+
+  const friendMatchups = useMemo(
+    () =>
+      friendIds
+        .map((friendId) => ({
+          person: peopleById.get(friendId),
+          record: matchups.find(
+            (matchup) => matchup.opponent_id === friendId,
+          ),
+        }))
+        .filter(
+          (
+            row,
+          ): row is {
+            person: ProfileRow;
+            record: HeadToHeadRow | undefined;
+          } => Boolean(row.person),
+        )
+        .sort(
+          (a, b) =>
+            (b.record?.games_played ?? 0) -
+            (a.record?.games_played ?? 0),
+        ),
+    [friendIds, matchups, peopleById],
+  );
 
   const runMutation = async (
     action: () => PromiseLike<{ error: { message: string } | null }>,
@@ -570,7 +621,41 @@ export default function ProfileDashboard({
       <section className="profile-section">
         <div className="profile-section-head">
           <div>
-            <span>04 / MOBILE CONTROLS</span>
+            <span>04 / FRIEND MATCHUPS</span>
+            <h3>친구 맞대결 전적</h3>
+          </div>
+        </div>
+        <div className="matchup-list">
+          {friendMatchups.length ? (
+            friendMatchups.map(({ person, record }) => {
+              const games = record?.games_played ?? 0;
+              const winRate = games
+                ? Math.round(((record?.wins ?? 0) / games) * 100)
+                : 0;
+              return (
+                <div key={person.id}>
+                  <strong>{person.username}</strong>
+                  <span>
+                    {games
+                      ? `${record?.wins ?? 0}승 ${record?.losses ?? 0}패`
+                      : "아직 맞대결 없음"}
+                  </span>
+                  <em>{games ? `${winRate}% WIN RATE` : "—"}</em>
+                </div>
+              );
+            })
+          ) : (
+            <p className="profile-empty">
+              친구를 추가하면 둘 사이의 승패와 승률이 기록됩니다.
+            </p>
+          )}
+        </div>
+      </section>
+
+      <section className="profile-section">
+        <div className="profile-section-head">
+          <div>
+            <span>05 / MOBILE CONTROLS</span>
             <h3>모바일 이동키 사전 설정</h3>
           </div>
         </div>
