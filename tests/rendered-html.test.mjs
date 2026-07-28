@@ -295,9 +295,26 @@ test("ships without starter-only assets", async () => {
   assert.match(gameClient, /const MAX_RESCUE_GROUNDED_MS = 2400/);
   assert.match(gameClient, /function samePiece\(left: Piece, right: Piece\)/);
   assert.match(gameClient, /const pieceGenerationRef = useRef\(0\)/);
+  assert.match(gameClient, /const pressedHardDropKeysRef = useRef\(new Set<string>\(\)\)/);
   assert.match(
     gameClient,
     /expectedGeneration !== pieceGenerationRef\.current[\s\S]*!samePiece\(activeRef\.current, piece\)/,
+  );
+  assert.match(
+    gameClient,
+    /if \(!samePiece\(activeRef\.current, active\)\) return;/,
+  );
+  assert.match(
+    gameClient,
+    /pressedHardDropKeysRef\.current\.has\(event\.code\)/,
+  );
+  assert.match(
+    gameClient,
+    /pressedHardDropKeysRef\.current\.delete\(event\.code\)/,
+  );
+  assert.match(
+    gameClient,
+    /pressedHardDropKeysRef\.current\.clear\(\)/,
   );
   assert.match(
     gameClient,
@@ -453,6 +470,18 @@ test("ships without starter-only assets", async () => {
   assert.match(globalCss, /\.item-cell/);
   assert.match(globalCss, /\.board-item-status/);
   assert.match(globalCss, /\.gravity-guide/);
+  assert.match(
+    globalCss,
+    /\.screen-multiplayer-playing \.opponents-grid \{[\s\S]*overflow-y: auto;/,
+  );
+  assert.match(
+    globalCss,
+    /\.screen-multiplayer-playing \.opponents-zone \{[\s\S]*grid-template-rows: auto minmax\(0, 1fr\) auto;/,
+  );
+  assert.match(
+    globalCss,
+    /\.screen-multiplayer-playing \.opponents-zone \.party-chat-log \{[\s\S]*height: clamp\(76px, 12dvh, 132px\);/,
+  );
   assert.match(globalCss, /\.mobile-inventory-fire/);
   assert.doesNotMatch(globalCss, /\.mobile-item-action/);
   assert.match(globalCss, /\.piece-W/);

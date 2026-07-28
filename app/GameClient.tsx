@@ -745,6 +745,7 @@ function GameBoard({
   const snapshotSentAt = useRef(0);
   const onSnapshotRef = useRef(onSnapshot);
   const repeatHandles = useRef(new Map<string, RepeatHandle>());
+  const pressedHardDropKeysRef = useRef(new Set<string>());
   const inputBlockedUntilRef = useRef(0);
   const actionRef = useRef<(action: GameAction) => void>(() => undefined);
   const stepDownRef = useRef<() => void>(() => undefined);
@@ -823,10 +824,10 @@ function GameBoard({
     ) => {
       const currentBoard = boardRef.current;
       if (
-        !force &&
-        (expectedGeneration !== pieceGenerationRef.current ||
-          !samePiece(activeRef.current, piece) ||
-          !collides(currentBoard, { ...piece, y: piece.y + 1 }))
+        expectedGeneration !== pieceGenerationRef.current ||
+        (!force &&
+          (!samePiece(activeRef.current, piece) ||
+            !collides(currentBoard, { ...piece, y: piece.y + 1 })))
       ) {
         return;
       }
@@ -1348,6 +1349,8 @@ function GameBoard({
   }, []);
 
   const hardDrop = useCallback(() => {
+    if (!samePiece(activeRef.current, active)) return;
+    const expectedGeneration = pieceGenerationRef.current;
     inputBlockedUntilRef.current = window.performance.now() + 75;
     let dropped = { ...active };
     let distance = 0;
@@ -1379,7 +1382,7 @@ function GameBoard({
         ),
       360,
     );
-    lockPiece(dropped, true);
+    lockPiece(dropped, true, expectedGeneration);
   }, [active, board, lockPiece]);
 
   const holdPiece = useCallback(() => {
@@ -1522,6 +1525,10 @@ function GameBoard({
       if (!action) return;
       event.preventDefault();
       if (event.repeat) return;
+      if (action === "hardDrop") {
+        if (pressedHardDropKeysRef.current.has(event.code)) return;
+        pressedHardDropKeysRef.current.add(event.code);
+      }
       if (action === "left" || action === "right" || action === "down") {
         if (action === "left") stopRepeat(`key:${controls.right}`);
         if (action === "right") stopRepeat(`key:${controls.left}`);
@@ -1536,16 +1543,21 @@ function GameBoard({
       }
     };
     const handleKeyUp = (event: KeyboardEvent) => {
+      pressedHardDropKeysRef.current.delete(event.code);
       stopRepeat(`key:${event.code}`);
+    };
+    const releaseAllInputs = () => {
+      pressedHardDropKeysRef.current.clear();
+      stopAllRepeats();
     };
     window.addEventListener("keydown", handleKeyDown);
     window.addEventListener("keyup", handleKeyUp);
-    window.addEventListener("blur", stopAllRepeats);
+    window.addEventListener("blur", releaseAllInputs);
     return () => {
       window.removeEventListener("keydown", handleKeyDown);
       window.removeEventListener("keyup", handleKeyUp);
-      window.removeEventListener("blur", stopAllRepeats);
-      stopAllRepeats();
+      window.removeEventListener("blur", releaseAllInputs);
+      releaseAllInputs();
     };
   }, [
     controls,

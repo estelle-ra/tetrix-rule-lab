@@ -810,6 +810,37 @@ input:focus-visible {
     );
   }
 
+  .screen-multiplayer-playing .online-arena {
+    height: calc(100dvh - 58px);
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .screen-multiplayer-playing .opponents-zone {
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr) auto;
+    height: 100%;
+    min-height: 0;
+  }
+
+  .screen-multiplayer-playing .opponents-grid {
+    align-content: start;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding-right: 5px;
+    scrollbar-gutter: stable;
+    scrollbar-width: thin;
+  }
+
+  .screen-multiplayer-playing .opponents-zone .party-chat {
+    margin-top: 12px;
+  }
+
+  .screen-multiplayer-playing .opponents-zone .party-chat-log {
+    height: clamp(76px, 12dvh, 132px);
+  }
+
   .screen-playing .solo-wrap {
     align-items: start;
     grid-template-columns: auto;
