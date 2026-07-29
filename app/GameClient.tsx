@@ -4842,7 +4842,9 @@ function OnlineParty({
       className={`online-match ${isLateJoinSpectator ? "online-spectating" : ""} ${
         isSpectating && !isLateJoinSpectator ? "online-eliminated" : ""
       } ${phase === "ended" ? "online-ended" : ""
-      } ${phase === "countdown" ? "online-countdown" : ""}`}
+      } ${phase === "countdown" ? "online-countdown" : ""} ${
+        remotePlayers.length >= 4 ? "online-many-opponents" : ""
+      } ${remotePlayers.length >= 5 ? "online-packed-opponents" : ""}`}
     >
       <div className="online-match-bar">
         <div>

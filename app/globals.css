@@ -2489,6 +2489,49 @@ button.online-choice:hover {
   margin-top: 18px;
 }
 
+@media (min-width: 1051px) {
+  .screen-multiplayer-playing .online-many-opponents .online-arena {
+    gap: clamp(14px, 1.4vw, 24px);
+    grid-template-columns: minmax(470px, max-content) minmax(350px, 440px);
+  }
+
+  .screen-multiplayer-playing .online-many-opponents .opponents-zone {
+    max-width: 440px;
+    padding-left: 18px;
+  }
+
+  .screen-multiplayer-playing .online-many-opponents .opponents-grid {
+    gap: 8px;
+    grid-template-columns: repeat(2, minmax(108px, 1fr));
+  }
+
+  .screen-multiplayer-playing .online-many-opponents .remote-player {
+    padding: 6px;
+  }
+
+  .screen-multiplayer-playing .online-many-opponents .remote-player-head {
+    margin-bottom: 4px;
+  }
+
+  .screen-multiplayer-playing .online-many-opponents .remote-stats {
+    margin-top: 4px;
+  }
+}
+
+@media (min-width: 1440px) {
+  .screen-multiplayer-playing .online-packed-opponents .online-arena {
+    grid-template-columns: minmax(470px, max-content) minmax(500px, 600px);
+  }
+
+  .screen-multiplayer-playing .online-packed-opponents .opponents-zone {
+    max-width: 600px;
+  }
+
+  .screen-multiplayer-playing .online-packed-opponents .opponents-grid {
+    grid-template-columns: repeat(3, minmax(102px, 1fr));
+  }
+}
+
 .online-results .party-chat {
   text-align: left;
 }

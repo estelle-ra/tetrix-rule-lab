@@ -548,6 +548,16 @@ test("ships without starter-only assets", async () => {
   assert.match(gameClient, /const MAX_GROUNDED_MS = 1800/);
   assert.match(gameClient, /aria-label="왼손 이동 조이스틱"/);
   assert.match(gameClient, /className="joystick-base"/);
+  assert.match(gameClient, /online-many-opponents/);
+  assert.match(gameClient, /online-packed-opponents/);
+  assert.match(
+    globalCss,
+    /\.online-many-opponents \.opponents-grid[\s\S]*repeat\(2, minmax\(108px, 1fr\)\)/,
+  );
+  assert.match(
+    globalCss,
+    /\.online-packed-opponents \.opponents-grid[\s\S]*repeat\(3, minmax\(102px, 1fr\)\)/,
+  );
   assert.match(gameClient, /const radius = 46/);
   assert.match(gameClient, /distance >= JOYSTICK_DEADZONE/);
   assert.match(gameClient, /stepDownRef\.current\(\)/);
