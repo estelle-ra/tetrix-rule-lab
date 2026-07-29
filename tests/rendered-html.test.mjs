@@ -146,11 +146,7 @@ test("ships without starter-only assets", async () => {
   assert.match(gameClient, /nextScreen !== "versus"/);
   assert.match(gameClient, /submit_game_result/);
   assert.match(gameClient, /NEW PERSONAL BEST/);
-  assert.match(gameClient, /inputBlockedUntilRef/);
-  assert.match(
-    gameClient,
-    /action === "down" \|\|\s*action === "hardDrop"/,
-  );
+  assert.match(gameClient, /hardDropFrameLockRef/);
   assert.match(gameClient, /clearRepeatHandles/);
   assert.match(gameClient, /RETRY JOIN/);
   assert.match(gameClient, /MULTIPLAYER INVITE/);
@@ -277,10 +273,10 @@ test("ships without starter-only assets", async () => {
   assert.match(gameClient, /changeMobileControlLayout/);
   assert.match(gameClient, /controlLayoutStorage/);
   assert.match(gameClient, /MATCH COMPLETE/);
-  assert.match(gameClient, /HORIZONTAL_DAS_MS = 140/);
-  assert.match(gameClient, /HORIZONTAL_ARR_MS = 54/);
-  assert.match(gameClient, /JOYSTICK_HORIZONTAL_DAS_MS = 165/);
-  assert.match(gameClient, /JOYSTICK_HORIZONTAL_ARR_MS = 66/);
+  assert.match(gameClient, /HORIZONTAL_DAS_MS = 175/);
+  assert.match(gameClient, /HORIZONTAL_ARR_MS = 58/);
+  assert.match(gameClient, /JOYSTICK_HORIZONTAL_DAS_MS = 190/);
+  assert.match(gameClient, /JOYSTICK_HORIZONTAL_ARR_MS = 72/);
   assert.match(gameClient, /JOYSTICK_DEADZONE = 22/);
   assert.match(gameClient, /joystickInputOriginRef/);
   assert.match(gameClient, /joystickArmedAtRef/);
@@ -291,8 +287,8 @@ test("ships without starter-only assets", async () => {
   assert.match(gameClient, /const HIDDEN_SPAWN_ROWS = 4/);
   assert.match(gameClient, /const VISIBLE_HEIGHT = 20/);
   assert.match(gameClient, /const HEIGHT = VISIBLE_HEIGHT \+ BUFFER_ROWS/);
-  assert.match(gameClient, /const RESCUE_LOCK_DELAY_MS = 700/);
-  assert.match(gameClient, /const MAX_RESCUE_GROUNDED_MS = 2400/);
+  assert.match(gameClient, /const RESCUE_LOCK_DELAY_MS = 760/);
+  assert.match(gameClient, /const MAX_RESCUE_GROUNDED_MS = 2600/);
   assert.match(gameClient, /function samePiece\(left: Piece, right: Piece\)/);
   assert.match(gameClient, /const pieceGenerationRef = useRef\(0\)/);
   assert.match(gameClient, /const pressedHardDropKeysRef = useRef\(new Set<string>\(\)\)/);
@@ -302,7 +298,7 @@ test("ships without starter-only assets", async () => {
   );
   assert.match(
     gameClient,
-    /if \(!samePiece\(activeRef\.current, active\)\) return;/,
+    /if \(hardDropFrameLockRef\.current\) return;/,
   );
   assert.match(
     gameClient,
@@ -496,14 +492,11 @@ test("ships without starter-only assets", async () => {
   assert.match(gameClient, /aria-label="모바일 게임 조작"/);
   assert.match(gameClient, /initialDelay = 105/);
   assert.match(gameClient, /repeatRate = 38/);
-  assert.match(
-    gameClient,
-    /function spawn\(type: PieceName, y = BUFFER_ROWS\)/,
-  );
+  assert.match(gameClient, /function spawn\(type: PieceName, y = SPAWN_ROW\)/);
   assert.match(gameClient, /function findSpawnPosition/);
   assert.match(
     gameClient,
-    /for \(let y = BUFFER_ROWS; y >= -HIDDEN_SPAWN_ROWS; y -= 1\)/,
+    /for \(let y = SPAWN_ROW; y >= -HIDDEN_SPAWN_ROWS; y -= 1\)/,
   );
   assert.match(gameClient, /if \(y < 0\) overflow = true/);
   assert.match(gameClient, /if \(overflow\) \{\s*finish\(/);
@@ -543,9 +536,19 @@ test("ships without starter-only assets", async () => {
     globalCss,
     /\.lobby-code-panel strong[\s\S]*clamp\(28px, 2\.5vw, 36px\)/,
   );
-  assert.match(gameClient, /const LOCK_DELAY_MS = 350/);
+  assert.match(gameClient, /const SPAWN_ROW = 0/);
+  assert.match(gameClient, /function spawn\(type: PieceName, y = SPAWN_ROW\)/);
+  assert.match(gameClient, /const LOCK_DELAY_MS = 420/);
   assert.match(gameClient, /const MAX_LOCK_RESETS = 8/);
-  assert.match(gameClient, /const MAX_GROUNDED_MS = 1800/);
+  assert.match(gameClient, /const MAX_GROUNDED_MS = 2000/);
+  assert.match(gameClient, /const HORIZONTAL_DAS_MS = 175/);
+  assert.match(gameClient, /const MOBILE_BUTTON_DAS_MS = 175/);
+  assert.match(gameClient, /hardDropFrameLockRef/);
+  assert.doesNotMatch(gameClient, /inputBlockedUntilRef/);
+  assert.match(
+    gameClient,
+    /const currentActive = activeRef\.current;[\s\S]*const moved = \{ \.\.\.currentActive, x: currentActive\.x \+ dx \}/,
+  );
   assert.match(gameClient, /aria-label="왼손 이동 조이스틱"/);
   assert.match(gameClient, /className="joystick-base"/);
   assert.match(gameClient, /online-many-opponents/);

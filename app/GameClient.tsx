@@ -218,18 +218,21 @@ const VISIBLE_HEIGHT = 20;
 // invisibly there.
 const BUFFER_ROWS = 3;
 const HIDDEN_SPAWN_ROWS = 4;
+const SPAWN_ROW = 0;
 const HEIGHT = VISIBLE_HEIGHT + BUFFER_ROWS;
 const DANGER_VISIBLE_ROWS = 7;
-const LOCK_DELAY_MS = 350;
-const RESCUE_LOCK_DELAY_MS = 700;
+const LOCK_DELAY_MS = 420;
+const RESCUE_LOCK_DELAY_MS = 760;
 const MAX_LOCK_RESETS = 8;
-const MAX_GROUNDED_MS = 1800;
-const MAX_RESCUE_GROUNDED_MS = 2400;
-const HORIZONTAL_DAS_MS = 140;
-const HORIZONTAL_ARR_MS = 54;
+const MAX_GROUNDED_MS = 2000;
+const MAX_RESCUE_GROUNDED_MS = 2600;
+const HORIZONTAL_DAS_MS = 175;
+const HORIZONTAL_ARR_MS = 58;
 const JOYSTICK_DEADZONE = 22;
-const JOYSTICK_HORIZONTAL_DAS_MS = 165;
-const JOYSTICK_HORIZONTAL_ARR_MS = 66;
+const JOYSTICK_HORIZONTAL_DAS_MS = 190;
+const JOYSTICK_HORIZONTAL_ARR_MS = 72;
+const MOBILE_BUTTON_DAS_MS = 175;
+const MOBILE_BUTTON_ARR_MS = 58;
 const INK_EFFECT_MS = 4200;
 const SPEED_EFFECT_MS = 7000;
 const SPIN_EFFECT_MS = 5000;
@@ -497,7 +500,7 @@ function nextQueue(
   return output;
 }
 
-function spawn(type: PieceName, y = BUFFER_ROWS): Piece {
+function spawn(type: PieceName, y = SPAWN_ROW): Piece {
   return {
     type,
     rotation: 0,
@@ -507,7 +510,7 @@ function spawn(type: PieceName, y = BUFFER_ROWS): Piece {
 }
 
 function findSpawnPosition(board: Board, type: PieceName): Piece | null {
-  for (let y = BUFFER_ROWS; y >= -HIDDEN_SPAWN_ROWS; y -= 1) {
+  for (let y = SPAWN_ROW; y >= -HIDDEN_SPAWN_ROWS; y -= 1) {
     const candidate = spawn(type, y);
     if (!collides(board, candidate)) return candidate;
   }
@@ -746,7 +749,7 @@ function GameBoard({
   const onSnapshotRef = useRef(onSnapshot);
   const repeatHandles = useRef(new Map<string, RepeatHandle>());
   const pressedHardDropKeysRef = useRef(new Set<string>());
-  const inputBlockedUntilRef = useRef(0);
+  const hardDropFrameLockRef = useRef(false);
   const actionRef = useRef<(action: GameAction) => void>(() => undefined);
   const stepDownRef = useRef<() => void>(() => undefined);
   const lockDeadlineRef = useRef<number | null>(null);
@@ -1027,12 +1030,13 @@ function GameBoard({
 
   const stepDown = useCallback(() => {
     if (status !== "playing") return;
-    const moved = { ...active, y: active.y + 1 };
-    if (!collides(board, moved)) {
+    const currentActive = activeRef.current;
+    const moved = { ...currentActive, y: currentActive.y + 1 };
+    if (!collides(boardRef.current, moved)) {
       activeRef.current = moved;
       setActive(moved);
     }
-  }, [active, board, status]);
+  }, [status]);
 
   useEffect(() => {
     stepDownRef.current = stepDown;
@@ -1292,8 +1296,9 @@ function GameBoard({
 
   const move = useCallback(
     (dx: number) => {
-      const moved = { ...active, x: active.x + dx };
-      if (!collides(board, moved)) {
+      const currentActive = activeRef.current;
+      const moved = { ...currentActive, x: currentActive.x + dx };
+      if (!collides(boardRef.current, moved)) {
         refreshLockDelay();
         lastActionWasRotation.current = false;
         lastRotationKickIndex.current = -1;
@@ -1301,7 +1306,7 @@ function GameBoard({
         setActive(moved);
       }
     },
-    [active, board, refreshLockDelay],
+    [refreshLockDelay],
   );
 
   const rotate = useCallback(
@@ -1311,23 +1316,24 @@ function GameBoard({
         window.setTimeout(() => setFlash(""), 360);
         return;
       }
-      const fromRotation = active.rotation;
-      const toRotation = (active.rotation + direction + 4) % 4;
+      const currentActive = activeRef.current;
+      const fromRotation = currentActive.rotation;
+      const toRotation = (currentActive.rotation + direction + 4) % 4;
       const rotated = {
-        ...active,
+        ...currentActive,
         rotation: toRotation,
       };
       const kickKey = `${fromRotation}>${toRotation}`;
       const kicks =
-        active.type === "O"
+        currentActive.type === "O"
           ? ([[0, 0]] as const)
-          : active.type === "I"
+          : currentActive.type === "I"
             ? (I_KICKS[kickKey] ?? [[0, 0]])
             : (JLSTZ_KICKS[kickKey] ?? [[0, 0]]);
       for (let index = 0; index < kicks.length; index += 1) {
         const [x, y] = kicks[index];
         const candidate = { ...rotated, x: rotated.x + x, y: rotated.y + y };
-        if (!collides(board, candidate)) {
+        if (!collides(boardRef.current, candidate)) {
           refreshLockDelay();
           lastActionWasRotation.current = true;
           lastRotationKickIndex.current = index;
@@ -1337,7 +1343,7 @@ function GameBoard({
         }
       }
     },
-    [active, board, refreshLockDelay, spinLocked],
+    [refreshLockDelay, spinLocked],
   );
 
   const clearRepeatHandles = useCallback(() => {
@@ -1349,12 +1355,17 @@ function GameBoard({
   }, []);
 
   const hardDrop = useCallback(() => {
-    if (!samePiece(activeRef.current, active)) return;
+    if (hardDropFrameLockRef.current) return;
+    hardDropFrameLockRef.current = true;
+    window.requestAnimationFrame(() => {
+      hardDropFrameLockRef.current = false;
+    });
+    const currentActive = activeRef.current;
+    const currentBoard = boardRef.current;
     const expectedGeneration = pieceGenerationRef.current;
-    inputBlockedUntilRef.current = window.performance.now() + 75;
-    let dropped = { ...active };
+    let dropped = { ...currentActive };
     let distance = 0;
-    while (!collides(board, { ...dropped, y: dropped.y + 1 })) {
+    while (!collides(currentBoard, { ...dropped, y: dropped.y + 1 })) {
       dropped = { ...dropped, y: dropped.y + 1 };
       distance += 1;
     }
@@ -1383,7 +1394,7 @@ function GameBoard({
       360,
     );
     lockPiece(dropped, true, expectedGeneration);
-  }, [active, board, lockPiece]);
+  }, [lockPiece]);
 
   const holdPiece = useCallback(() => {
     if (!canHold) return;
@@ -1430,15 +1441,6 @@ function GameBoard({
   const performAction = useCallback(
     (action: GameAction) => {
       if (status !== "playing") return;
-      if (
-        (action === "left" ||
-          action === "right" ||
-          action === "down" ||
-          action === "hardDrop") &&
-        window.performance.now() < inputBlockedUntilRef.current
-      ) {
-        return;
-      }
       if (action === "left") move(-1);
       if (action === "right") move(1);
       if (action === "down") {
@@ -1579,8 +1581,8 @@ function GameBoard({
       startRepeat(
         token,
         action,
-        action === "down" ? 60 : 95,
-        action === "down" ? 28 : 34,
+        action === "down" ? 75 : MOBILE_BUTTON_DAS_MS,
+        action === "down" ? 34 : MOBILE_BUTTON_ARR_MS,
       );
     } else {
       actionRef.current(action);
