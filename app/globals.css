@@ -607,7 +607,7 @@ input:focus-visible {
   background-position: center;
   background-repeat: no-repeat;
   background-size: auto, auto, 48px 48px, 48px 48px, cover;
-  height: 100dvh;
+  height: var(--visual-viewport-height);
   overflow: hidden;
 }
 
@@ -616,8 +616,8 @@ input:focus-visible {
 }
 
 .screen-playing .play-screen {
-  height: 100dvh;
-  min-height: 100dvh;
+  height: var(--visual-viewport-height);
+  min-height: var(--visual-viewport-height);
   overflow-anchor: none;
   overflow: hidden;
 }
@@ -811,7 +811,7 @@ input:focus-visible {
   }
 
   .screen-multiplayer-playing .online-arena {
-    height: calc(100dvh - 58px);
+    height: calc(var(--visual-viewport-height) - 96px);
     min-height: 0;
     overflow: hidden;
   }
@@ -839,6 +839,10 @@ input:focus-visible {
 
   .screen-multiplayer-playing .opponents-zone .party-chat-log {
     height: clamp(76px, 12dvh, 132px);
+  }
+
+  .screen-multiplayer-playing .online-packed-opponents .opponents-zone .party-chat-log {
+    height: clamp(64px, 9dvh, 96px);
   }
 
   .screen-playing .solo-wrap {
@@ -1116,8 +1120,10 @@ input:focus-visible {
 }
 
 .piece-ghost {
-  background: rgba(255, 255, 255, 0.055) !important;
-  border: 1px solid rgba(255, 255, 255, 0.28) !important;
+  background: transparent !important;
+  border: 1px dashed rgba(207, 229, 238, 0.34) !important;
+  box-shadow: inset 0 0 0 1px rgba(5, 7, 9, 0.7) !important;
+  opacity: 0.72;
 }
 
 .piece-rail {
@@ -2158,6 +2164,62 @@ button.online-choice:hover {
 .lobby-slot > strong {
   font-size: 15px;
   letter-spacing: 0.04em;
+}
+
+.lobby-spectators {
+  background: rgba(12, 14, 17, 0.78);
+  border: 1px solid #30363e;
+  margin-top: 10px;
+  padding: 12px;
+}
+
+.lobby-spectators > div {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.lobby-spectators > div strong {
+  color: var(--cyan);
+  font: 800 10px monospace;
+  letter-spacing: 0.12em;
+}
+
+.lobby-spectators > div span {
+  color: #69727d;
+  font: 10px monospace;
+}
+
+.lobby-spectators ul {
+  display: grid;
+  gap: 6px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 0;
+}
+
+.lobby-spectators li {
+  align-items: center;
+  border: 1px solid #282e35;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  min-height: 38px;
+  padding: 5px 8px;
+}
+
+.lobby-spectators li > span,
+.lobby-spectators li > em {
+  color: #68717c;
+  font: normal 9px monospace;
+}
+
+.lobby-spectators li > strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .slot-filled {
@@ -5085,6 +5147,16 @@ footer {
 
   .lobby-slots {
     grid-template-columns: 1fr;
+  }
+
+  .lobby-spectators ul {
+    grid-template-columns: 1fr;
+  }
+
+  .lobby-spectators > div {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 5px;
   }
 
   .online-match-bar {

@@ -133,7 +133,11 @@ test("ships without starter-only assets", async () => {
   assert.match(packageJson, /"name": "tetstar"/);
   assert.match(packageJson, /"peerjs":/);
   assert.doesNotMatch(packageJson, /react-loading-skeleton/);
-  assert.match(gameClient, /playersRef\.current\.length >= 8/);
+  assert.match(gameClient, /const MAX_ROOM_PLAYERS = 8/);
+  assert.match(gameClient, /const MAX_ROOM_SPECTATORS = 8/);
+  assert.match(gameClient, /function normalizeLobbyRoster/);
+  assert.match(gameClient, /clientKey: packet\.clientKey/);
+  assert.match(gameClient, /type: "lobby-request"/);
   assert.match(gameClient, /src=\{`\$\{GAME_ASSET_BASE_PATH\}icon\.svg`\}/);
   assert.match(gameClient, /import Image from "next\/image"/);
   assert.match(gameClient, /reason: "ROOM_FULL"/);
@@ -162,7 +166,7 @@ test("ships without starter-only assets", async () => {
   assert.match(gameClient, /type: "host-transfer"/);
   assert.match(gameClient, /scheduleRealtimePresenceLeave/);
   assert.match(gameClient, /finalizeRealtimePresenceLeave/);
-  assert.match(gameClient, /phaseRef\.current === "lobby" \? 20000 : 8000/);
+  assert.match(gameClient, /phaseRef\.current === "lobby" \? 6000 : 8000/);
   assert.match(gameClient, /let subscribedOnce = false/);
   assert.match(gameClient, /player\.id === hostId/);
   assert.match(gameClient, /type: "attack-log"/);
@@ -228,7 +232,8 @@ test("ships without starter-only assets", async () => {
   assert.match(gameClient, /type: "ink-state"/);
   assert.match(gameClient, /remote-ink-overlay/);
   assert.match(gameClient, /focusChatWithEnter/);
-  assert.match(gameClient, /inputRef\.current\?\.focus\(\)/);
+  assert.match(gameClient, /input\.focus\(\{ preventScroll: true \}\)/);
+  assert.match(gameClient, /input\.scrollIntoView/);
   assert.match(gameClient, /log\.scrollTop = log\.scrollHeight/);
   assert.match(gameClient, /globalShortcut = true/);
   assert.match(gameClient, /className="mobile-match-chat"/);
@@ -273,10 +278,10 @@ test("ships without starter-only assets", async () => {
   assert.match(gameClient, /changeMobileControlLayout/);
   assert.match(gameClient, /controlLayoutStorage/);
   assert.match(gameClient, /MATCH COMPLETE/);
-  assert.match(gameClient, /HORIZONTAL_DAS_MS = 175/);
-  assert.match(gameClient, /HORIZONTAL_ARR_MS = 58/);
-  assert.match(gameClient, /JOYSTICK_HORIZONTAL_DAS_MS = 190/);
-  assert.match(gameClient, /JOYSTICK_HORIZONTAL_ARR_MS = 72/);
+  assert.match(gameClient, /HORIZONTAL_DAS_MS = 155/);
+  assert.match(gameClient, /HORIZONTAL_ARR_MS = 50/);
+  assert.match(gameClient, /JOYSTICK_HORIZONTAL_DAS_MS = 175/);
+  assert.match(gameClient, /JOYSTICK_HORIZONTAL_ARR_MS = 64/);
   assert.match(gameClient, /JOYSTICK_DEADZONE = 22/);
   assert.match(gameClient, /joystickInputOriginRef/);
   assert.match(gameClient, /joystickArmedAtRef/);
@@ -433,6 +438,9 @@ test("ships without starter-only assets", async () => {
   assert.match(gameClient, /snapshotMap\.has\(localIdRef\.current\)/);
   assert.match(gameClient, /"SYNCING"/);
   assert.match(gameClient, /onSnapshotRef\.current = onSnapshot/);
+  assert.match(gameClient, /ghost\.y - active\.y > 1/);
+  assert.match(gameClient, /input\.getClientRects\(\)\.length === 0/);
+  assert.match(gameClient, /startTransition\(\(\) => setPlayers/);
   assert.match(gameClient, /snapshotIntervalMs - \(now - snapshotSentAt\.current\)/);
   assert.match(
     gameClient,
@@ -458,6 +466,8 @@ test("ships without starter-only assets", async () => {
   assert.match(globalCss, /margin-bottom: calc\(var\(--cell\) \* 2\)/);
   assert.match(globalCss, /\.garbage-meter/);
   assert.match(globalCss, /\.slot-reconnecting/);
+  assert.match(globalCss, /\.lobby-spectators/);
+  assert.match(globalCss, /border: 1px dashed rgba\(207, 229, 238, 0\.34\)/);
   assert.match(globalCss, /\.kick-player/);
   assert.match(globalCss, /\.board-danger/);
   assert.match(globalCss, /\.board-topout/);
@@ -566,8 +576,8 @@ test("ships without starter-only assets", async () => {
   assert.match(gameClient, /const LOCK_DELAY_MS = 420/);
   assert.match(gameClient, /const MAX_LOCK_RESETS = 8/);
   assert.match(gameClient, /const MAX_GROUNDED_MS = 2000/);
-  assert.match(gameClient, /const HORIZONTAL_DAS_MS = 175/);
-  assert.match(gameClient, /const MOBILE_BUTTON_DAS_MS = 175/);
+  assert.match(gameClient, /const HORIZONTAL_DAS_MS = 155/);
+  assert.match(gameClient, /const MOBILE_BUTTON_DAS_MS = 155/);
   assert.match(gameClient, /hardDropFrameLockRef/);
   assert.doesNotMatch(gameClient, /inputBlockedUntilRef/);
   assert.match(

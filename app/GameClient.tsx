@@ -1,6 +1,8 @@
 "use client";
 
 import {
+  memo,
+  startTransition,
   useCallback,
   useEffect,
   useMemo,
@@ -104,6 +106,7 @@ type PersonalBestResult = {
 type RoomPlayer = {
   id: string;
   userId?: string;
+  clientKey?: string;
   name: string;
   slot: number;
   alive: boolean;
@@ -138,7 +141,7 @@ type ChatMessage = {
 };
 
 type RoomPacket =
-  | { type: "join-request"; name: string; userId?: string }
+  | { type: "join-request"; name: string; userId?: string; clientKey?: string }
   | {
       type: "welcome";
       selfId: string;
@@ -176,6 +179,7 @@ type RoomPacket =
   | { type: "attack-log"; log: AttackLog }
   | { type: "chat-submit"; text: string }
   | { type: "chat"; message: ChatMessage }
+  | { type: "lobby-request" }
   | { type: "leave" }
   | { type: "kicked" }
   | { type: "lobby"; players: RoomPlayer[]; rules: Rules }
@@ -222,6 +226,9 @@ function rankRoomPlayers(players: RoomPlayer[], winnerId: string) {
 
 const WIDTH = 10;
 const VISIBLE_HEIGHT = 20;
+const MAX_ROOM_PLAYERS = 8;
+const MAX_ROOM_SPECTATORS = 8;
+const ROOM_CLIENT_KEY = "tetstar-room-client-v1";
 // Three rows are shown above the main field as the player's rescue area.
 // Active pieces may spawn farther above it, but locked blocks are never stored
 // invisibly there.
@@ -235,13 +242,13 @@ const RESCUE_LOCK_DELAY_MS = 760;
 const MAX_LOCK_RESETS = 8;
 const MAX_GROUNDED_MS = 2000;
 const MAX_RESCUE_GROUNDED_MS = 2600;
-const HORIZONTAL_DAS_MS = 175;
-const HORIZONTAL_ARR_MS = 58;
+const HORIZONTAL_DAS_MS = 155;
+const HORIZONTAL_ARR_MS = 50;
 const JOYSTICK_DEADZONE = 22;
-const JOYSTICK_HORIZONTAL_DAS_MS = 190;
-const JOYSTICK_HORIZONTAL_ARR_MS = 72;
-const MOBILE_BUTTON_DAS_MS = 175;
-const MOBILE_BUTTON_ARR_MS = 58;
+const JOYSTICK_HORIZONTAL_DAS_MS = 175;
+const JOYSTICK_HORIZONTAL_ARR_MS = 64;
+const MOBILE_BUTTON_DAS_MS = 155;
+const MOBILE_BUTTON_ARR_MS = 50;
 const INK_EFFECT_MS = 4200;
 const SPEED_EFFECT_MS = 7000;
 const SPIN_EFFECT_MS = 5000;
@@ -1720,9 +1727,13 @@ function GameBoard({
         while (!collides(board, { ...ghost, y: ghost.y + 1 })) {
           ghost = { ...ghost, y: ghost.y + 1 };
         }
-        pieceCells(ghost).forEach(([x, y]) => {
-          if (y >= 0 && y < HEIGHT && !cells[y][x]) cells[y][x] = "ghost";
-        });
+        // A ghost directly beneath the live piece reads like a duplicated block.
+        // Hide it at that distance; the landing position is already unambiguous.
+        if (ghost.y - active.y > 1) {
+          pieceCells(ghost).forEach(([x, y]) => {
+            if (y >= 0 && y < HEIGHT && !cells[y][x]) cells[y][x] = "ghost";
+          });
+        }
       }
       pieceCells(active).forEach(([x, y]) => {
         if (y >= 0 && y < HEIGHT && x >= 0 && x < WIDTH) {
@@ -2223,6 +2234,51 @@ function cleanPlayerName(value: string) {
   return value.trim().replace(/\s+/g, " ").slice(0, 16) || "PLAYER";
 }
 
+function getRoomClientKey() {
+  if (typeof window === "undefined") return "";
+  try {
+    const saved = window.localStorage.getItem(ROOM_CLIENT_KEY);
+    if (saved) return saved;
+    const created = crypto.randomUUID();
+    window.localStorage.setItem(ROOM_CLIENT_KEY, created);
+    return created;
+  } catch {
+    return crypto.randomUUID();
+  }
+}
+
+function roomCompetitors(players: RoomPlayer[]) {
+  return players.filter((player) => !player.spectating);
+}
+
+function normalizeLobbyRoster(players: RoomPlayer[]) {
+  const connected = players
+    .filter((player) => player.connected)
+    .sort((a, b) => a.slot - b.slot);
+  const competitors = connected.filter((player) => !player.spectating);
+  const spectators = connected.filter((player) => player.spectating);
+  const ordered = [...competitors, ...spectators];
+  return ordered.map((player, index) => ({
+    ...player,
+    slot: index,
+    alive: index < MAX_ROOM_PLAYERS,
+    spectating: index >= MAX_ROOM_PLAYERS,
+    eliminatedAt: undefined,
+    snapshot: undefined,
+  }));
+}
+
+function matchingRoomSession(
+  player: RoomPlayer,
+  senderId: string,
+  userId?: string,
+  clientKey?: string,
+) {
+  if (player.id === senderId) return true;
+  if (userId && player.userId === userId) return true;
+  return Boolean(clientKey && player.clientKey === clientKey);
+}
+
 function cleanMobileControlLayout(value: unknown): MobileControlLayout {
   return value === "buttons" ? "buttons" : "joystick";
 }
@@ -2291,8 +2347,17 @@ function PartyChat({
       ) {
         return;
       }
+      const input = inputRef.current;
+      if (!input || input.getClientRects().length === 0) return;
       event.preventDefault();
-      inputRef.current?.focus();
+      input.focus({ preventScroll: true });
+      window.requestAnimationFrame(() => {
+        input.scrollIntoView({
+          behavior: "smooth",
+          block: "nearest",
+          inline: "nearest",
+        });
+      });
     };
     window.addEventListener("keydown", focusChatWithEnter);
     return () => window.removeEventListener("keydown", focusChatWithEnter);
@@ -2354,7 +2419,7 @@ function PartyChat({
   );
 }
 
-function RemoteBoard({
+function RemoteBoardView({
   player,
   isSelf,
   selected,
@@ -2476,6 +2541,21 @@ function RemoteBoard({
     </article>
   );
 }
+
+const RemoteBoard = memo(
+  RemoteBoardView,
+  (previous, next) =>
+    previous.player === next.player &&
+    previous.isSelf === next.isSelf &&
+    previous.selected === next.selected &&
+    previous.targeting === next.targeting &&
+    previous.hotkey === next.hotkey &&
+    previous.inked === next.inked &&
+    previous.effect === next.effect &&
+    previous.currentItem === next.currentItem &&
+    previous.itemRemaining === next.itemRemaining &&
+    Boolean(previous.onItem) === Boolean(next.onItem),
+);
 
 function OnlineParty({
   rules,
@@ -2608,6 +2688,7 @@ function OnlineParty({
   );
   const shortcutItemRef = useRef<(targetId: string) => void>(() => undefined);
   const leaveRoomRef = useRef<(reason?: string) => void>(() => undefined);
+  const returnToLobbyRef = useRef<() => void>(() => undefined);
   const onlineArenaRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -3040,7 +3121,8 @@ function OnlineParty({
     );
     realtimeSnapshotBatchRef.current.clear();
     if (!snapshots.length) return;
-    setPlayers([...playersRef.current]);
+    const nextPlayers = [...playersRef.current];
+    startTransition(() => setPlayers(nextPlayers));
     sendRealtimePacket({ type: "snapshots", snapshots });
   };
 
@@ -3481,7 +3563,9 @@ function OnlineParty({
     removeRealtimeSnapshotHostChannel(peerId);
     if (phaseRef.current === "lobby") {
       publishRoster(
-        playersRef.current.filter((player) => player.id !== peerId),
+        normalizeLobbyRoster(
+          playersRef.current.filter((player) => player.id !== peerId),
+        ),
       );
       return;
     }
@@ -3505,13 +3589,57 @@ function OnlineParty({
       return;
     }
     if (packet.type === "join-request") {
-      if (playersRef.current.some((player) => player.id === senderId)) {
-        ensureRealtimeSnapshotHostChannel(senderId);
+      const existingSession = playersRef.current.find((player) =>
+        matchingRoomSession(
+          player,
+          senderId,
+          packet.userId,
+          packet.clientKey,
+        ),
+      );
+      if (existingSession) {
+        if (
+          existingSession.id === localIdRef.current &&
+          existingSession.id !== senderId
+        ) {
+          sendRealtimePacket({ type: "kicked" }, senderId);
+          return;
+        }
+        const replacingConnection = existingSession.id !== senderId;
+        if (replacingConnection) {
+          const oldTimer = presenceDepartureTimersRef.current.get(
+            existingSession.id,
+          );
+          if (oldTimer !== undefined) {
+            window.clearTimeout(oldTimer);
+            presenceDepartureTimersRef.current.delete(existingSession.id);
+          }
+          removeRealtimeSnapshotHostChannel(existingSession.id);
+          sendRealtimePacket({ type: "kicked" }, existingSession.id);
+        }
+        const next = playersRef.current
+          .map((player) =>
+            player.id === existingSession.id
+              ? {
+                  ...player,
+                  id: senderId,
+                  userId: packet.userId ?? player.userId,
+                  clientKey: packet.clientKey ?? player.clientKey,
+                  name: cleanPlayerName(packet.name),
+                  connected: true,
+                }
+              : player,
+          )
+          .sort((a, b) => a.slot - b.slot);
+        replacePlayers(next);
+        if (!existingSession.spectating) {
+          ensureRealtimeSnapshotHostChannel(senderId);
+        }
         sendRealtimePacket(
           {
             type: "welcome",
             selfId: senderId,
-            players: playersRef.current,
+            players: next,
             started:
               phaseRef.current === "playing" ||
               phaseRef.current === "countdown",
@@ -3520,13 +3648,16 @@ function OnlineParty({
           },
           senderId,
         );
-        return;
-      }
-      if (playersRef.current.length >= 8) {
-        sendRealtimePacket(
-          { type: "full", reason: "ROOM_FULL" },
-          senderId,
-        );
+        if (replacingConnection) {
+          broadcast({
+            type: "roster",
+            players: next,
+            started:
+              phaseRef.current === "playing" ||
+              phaseRef.current === "countdown",
+            rules: rulesRef.current,
+          });
+        }
         return;
       }
       if (
@@ -3541,19 +3672,37 @@ function OnlineParty({
         );
         return;
       }
-      const joiningAsSpectator = phaseRef.current !== "lobby";
+      const competitorCount = roomCompetitors(playersRef.current).length;
+      const spectatorCount =
+        playersRef.current.length - competitorCount;
+      const joiningAsSpectator =
+        phaseRef.current !== "lobby" ||
+        competitorCount >= MAX_ROOM_PLAYERS;
+      if (joiningAsSpectator && spectatorCount >= MAX_ROOM_SPECTATORS) {
+        sendRealtimePacket(
+          { type: "full", reason: "ROOM_FULL" },
+          senderId,
+        );
+        return;
+      }
       const matchIsLive =
         phaseRef.current === "playing" || phaseRef.current === "countdown";
       const occupied = new Set(playersRef.current.map((player) => player.slot));
-      const slot = Array.from({ length: 8 }, (_, index) => index).find(
-        (index) => !occupied.has(index),
-      );
+      const slotStart = joiningAsSpectator ? MAX_ROOM_PLAYERS : 0;
+      const slotCount = joiningAsSpectator
+        ? MAX_ROOM_SPECTATORS
+        : MAX_ROOM_PLAYERS;
+      const slot = Array.from(
+        { length: slotCount },
+        (_, index) => slotStart + index,
+      ).find((index) => !occupied.has(index));
       if (slot === undefined) return;
       const next = [
         ...playersRef.current,
         {
           id: senderId,
           userId: packet.userId,
+          clientKey: packet.clientKey,
           name: cleanPlayerName(packet.name),
           slot,
           alive: !joiningAsSpectator,
@@ -3586,6 +3735,10 @@ function OnlineParty({
     }
     if (packet.type === "leave") {
       reconcilePlayerDeparture(senderId);
+      return;
+    }
+    if (packet.type === "lobby-request") {
+      returnToLobbyRef.current();
       return;
     }
     if (packet.type === "chat-submit") {
@@ -3634,11 +3787,6 @@ function OnlineParty({
     const registerConnection = () => {
       if (accepted) return;
       accepted = true;
-      if (playersRef.current.length >= 8) {
-        connection.send({ type: "full", reason: "ROOM_FULL" } satisfies RoomPacket);
-        connection.close();
-        return;
-      }
       if (phaseRef.current !== "lobby") {
         connection.send({
           type: "full",
@@ -3648,24 +3796,40 @@ function OnlineParty({
         return;
       }
 
-      const occupied = new Set(playersRef.current.map((player) => player.slot));
-      const slot = Array.from({ length: 8 }, (_, index) => index).find(
-        (index) => !occupied.has(index),
-      );
-      if (slot === undefined) return;
       const metadata = (connection.metadata ?? {}) as {
         name?: string;
         userId?: string;
+        clientKey?: string;
       };
+      const competitorCount = roomCompetitors(playersRef.current).length;
+      const joiningAsSpectator = competitorCount >= MAX_ROOM_PLAYERS;
+      const spectatorCount = playersRef.current.length - competitorCount;
+      if (joiningAsSpectator && spectatorCount >= MAX_ROOM_SPECTATORS) {
+        connection.send({ type: "full", reason: "ROOM_FULL" } satisfies RoomPacket);
+        connection.close();
+        return;
+      }
+      const occupied = new Set(playersRef.current.map((player) => player.slot));
+      const slotStart = joiningAsSpectator ? MAX_ROOM_PLAYERS : 0;
+      const slotCount = joiningAsSpectator
+        ? MAX_ROOM_SPECTATORS
+        : MAX_ROOM_PLAYERS;
+      const slot = Array.from(
+        { length: slotCount },
+        (_, index) => slotStart + index,
+      ).find((index) => !occupied.has(index));
+      if (slot === undefined) return;
       const next = [
         ...playersRef.current,
         {
           id: connection.peer,
           userId: metadata.userId,
+          clientKey: metadata.clientKey,
           name: cleanPlayerName(metadata.name ?? "PLAYER"),
           slot,
-          alive: true,
+          alive: !joiningAsSpectator,
           connected: true,
+          spectating: joiningAsSpectator,
         },
       ].sort((a, b) => a.slot - b.slot);
       connectionsRef.current.set(connection.peer, connection);
@@ -3733,9 +3897,11 @@ function OnlineParty({
         clearConnectionTimeout();
         setConnectionStatus("");
         setHostId(id);
+        const clientKey = getRoomClientKey();
         const host: RoomPlayer = {
           id,
           userId: playerUserId,
+          clientKey,
           name: cleanPlayerName(playerName),
           slot: 0,
           alive: true,
@@ -3765,6 +3931,7 @@ function OnlineParty({
     if (packet.type === "welcome") {
       clearConnectionTimeout();
       setConnectionStatus("");
+      setRoomError("");
       realtimeSnapshotAckAtRef.current = Date.now();
       realtimeSnapshotFallbackSentAtRef.current = 0;
       realtimeSnapshotFallbackModeRef.current = false;
@@ -3780,6 +3947,7 @@ function OnlineParty({
     }
     if (packet.type === "roster") {
       replacePlayers(packet.players);
+      setRoomError("");
       if (
         phaseRef.current !== "playing" &&
         phaseRef.current !== "countdown"
@@ -3790,6 +3958,7 @@ function OnlineParty({
     }
     if (packet.type === "start") {
       clearResultReveal();
+      setRoomError("");
       realtimeSnapshotAckAtRef.current = Date.now();
       realtimeSnapshotFallbackSentAtRef.current = 0;
       realtimeSnapshotFallbackModeRef.current = false;
@@ -3836,7 +4005,8 @@ function OnlineParty({
         const snapshot = snapshotMap.get(player.id);
         return snapshot ? { ...player, snapshot } : player;
       });
-      replacePlayers(next);
+      playersRef.current = next;
+      startTransition(() => setPlayers(next));
     }
     if (packet.type === "garbage") {
       enqueueGarbage(packet.amount, packet.comboChain);
@@ -3861,6 +4031,7 @@ function OnlineParty({
     }
     if (packet.type === "lobby") {
       clearCountdown();
+      setRoomError("");
       clearResultReveal();
       clearGarbageQueueTimer();
       setPendingGarbageDeadline(0);
@@ -3899,7 +4070,7 @@ function OnlineParty({
       setConnectionStatus("");
       setRoomError(
         packet.reason === "ROOM_FULL"
-          ? "이 방은 8명으로 가득 찼습니다."
+          ? "선수와 관전자 대기열이 모두 가득 찼습니다."
           : "이미 게임이 진행 중입니다.",
       );
       setPhase("entry");
@@ -3934,6 +4105,7 @@ function OnlineParty({
     roleRef.current = "guest";
     setPhase("connecting");
     const attempt = connectionAttemptRef.current + 1;
+    const clientKey = getRoomClientKey();
     connectionAttemptRef.current = attempt;
     hostConnectionRef.current?.close();
     peerRef.current?.destroy();
@@ -3981,6 +4153,7 @@ function OnlineParty({
           metadata: {
             name: cleanPlayerName(requestedName),
             userId: playerUserId,
+            clientKey,
           },
           serialization: "json",
           reliable: true,
@@ -4163,7 +4336,9 @@ function OnlineParty({
       if (roleRef.current === "host") publishRoster(reconnecting);
       else replacePlayers(reconnecting);
     }
-    const graceMs = phaseRef.current === "lobby" ? 20000 : 8000;
+    // Lobby seats should recover quickly after a closed or duplicated tab.
+    // Keep the longer in-match grace so app switching on mobile does not KO a player.
+    const graceMs = phaseRef.current === "lobby" ? 6000 : 8000;
     const timer = window.setTimeout(() => {
       presenceDepartureTimersRef.current.delete(playerId);
       finalizeRealtimePresenceLeave(playerId, attempt);
@@ -4183,6 +4358,7 @@ function OnlineParty({
     roleRef.current = "host";
     const code = generateRoomCode();
     const localId = crypto.randomUUID();
+    const clientKey = getRoomClientKey();
     const attempt = connectionAttemptRef.current + 1;
     connectionAttemptRef.current = attempt;
     localIdRef.current = localId;
@@ -4216,6 +4392,7 @@ function OnlineParty({
           const host: RoomPlayer = {
             id: localId,
             userId: playerUserId,
+            clientKey,
             name: cleanPlayerName(playerName),
             slot: 0,
             alive: true,
@@ -4234,6 +4411,7 @@ function OnlineParty({
                 type: "join-request",
                 name: host.name,
                 userId: playerUserId,
+                clientKey,
               });
             }
           });
@@ -4279,6 +4457,7 @@ function OnlineParty({
     roleRef.current = "guest";
     setPhase("connecting");
     const localId = crypto.randomUUID();
+    const clientKey = getRoomClientKey();
     const attempt = connectionAttemptRef.current + 1;
     connectionAttemptRef.current = attempt;
     localIdRef.current = localId;
@@ -4314,6 +4493,7 @@ function OnlineParty({
                 type: "join-request",
                 name,
                 userId: playerUserId,
+                clientKey,
               }),
             );
         }
@@ -4384,18 +4564,17 @@ function OnlineParty({
     setPlayerItemEffects({});
     replaceItemInventory([]);
     if (roleRef.current !== "host") {
-      setPhase("lobby");
+      if (realtimeChannelRef.current) {
+        sendRealtimePacket({ type: "lobby-request" });
+      } else if (hostConnectionRef.current?.open) {
+        hostConnectionRef.current.send({
+          type: "lobby-request",
+        } satisfies RoomPacket);
+      }
+      setConnectionStatus("대기실로 이동하는 중…");
       return;
     }
-    const next = playersRef.current
-      .filter((player) => player.connected)
-      .map((player) => ({
-        ...player,
-        alive: true,
-        spectating: false,
-        eliminatedAt: undefined,
-        snapshot: undefined,
-      }));
+    const next = normalizeLobbyRoster(playersRef.current);
     manualTargetsRef.current.clear();
     itemUsesRef.current.clear();
     revengeUsesRef.current.clear();
@@ -4416,16 +4595,27 @@ function OnlineParty({
     });
   };
 
+  useEffect(() => {
+    returnToLobbyRef.current = returnToLobby;
+  });
+
   const startMatch = () => {
-    if (roleRef.current !== "host" || playersRef.current.length < 2) return;
-    const next = playersRef.current
+    if (
+      roleRef.current !== "host" ||
+      roomCompetitors(playersRef.current).length < 2
+    ) {
+      return;
+    }
+    const connected = playersRef.current
       .filter(
         (player) =>
           player.connected &&
           (player.id === localIdRef.current ||
             Boolean(realtimeChannelRef.current) ||
             connectionsRef.current.has(player.id)),
-      )
+      );
+    const competitors = connected
+      .filter((player) => !player.spectating)
       .map((player) => ({
         ...player,
         alive: true,
@@ -4434,7 +4624,20 @@ function OnlineParty({
         eliminatedAt: undefined,
         snapshot: undefined,
       }));
-    if (next.length < 2) {
+    const spectators = connected
+      .filter((player) => player.spectating)
+      .map((player) => ({
+        ...player,
+        alive: false,
+        connected: true,
+        spectating: true,
+        eliminatedAt: undefined,
+        snapshot: undefined,
+      }));
+    const next = [...competitors, ...spectators].sort(
+      (a, b) => a.slot - b.slot,
+    );
+    if (competitors.length < 2) {
       publishRoster(next);
       setRoomError("재대전을 시작하려면 한 명 이상 다시 접속해야 합니다.");
       setPhase("lobby");
@@ -4770,7 +4973,9 @@ function OnlineParty({
     removeRealtimeSnapshotHostChannel(playerId);
     const next =
       phaseRef.current === "lobby"
-        ? playersRef.current.filter((player) => player.id !== playerId)
+        ? normalizeLobbyRoster(
+            playersRef.current.filter((player) => player.id !== playerId),
+          )
         : playersRef.current.map((player) =>
             player.id === playerId
               ? {
@@ -4868,7 +5073,12 @@ function OnlineParty({
   );
 
   const localPlayer = players.find((player) => player.id === localId);
-  const remotePlayers = players.filter((player) => player.id !== localId);
+  const competitors = roomCompetitors(players);
+  const waitingSpectators = players.filter((player) => player.spectating);
+  const connectedCompetitorCount = competitors.filter(
+    (player) => player.connected,
+  ).length;
+  const remotePlayers = competitors.filter((player) => player.id !== localId);
   const localMatchOutcome =
     phase === "ended" && localPlayer && !localPlayer.spectating
       ? localPlayer.id === winnerId
@@ -4915,7 +5125,7 @@ function OnlineParty({
     remotePlayers.find((player) => player.alive && player.connected) ??
     null;
   const survivors = players.filter(
-    (player) => player.alive && player.connected,
+    (player) => !player.spectating && player.alive && player.connected,
   ).length;
   const standings =
     phase === "ended" ? rankRoomPlayers(players, winnerId) : [];
@@ -5125,7 +5335,7 @@ function OnlineParty({
           <div className="lobby-heading">
             <div>
               <span className="eyebrow">WAITING ROOM</span>
-              <h2>{players.length} / 8 PLAYERS</h2>
+              <h2>{competitors.length} / 8 PLAYERS</h2>
             </div>
             <button className="leave-room" onClick={() => leaveRoom()}>
               LEAVE
@@ -5133,7 +5343,7 @@ function OnlineParty({
           </div>
           <div className="lobby-slots">
             {Array.from({ length: 8 }, (_, index) => {
-              const player = players.find((item) => item.slot === index);
+              const player = competitors.find((item) => item.slot === index);
               return (
                 <div
                   className={`lobby-slot ${player ? "slot-filled" : ""} ${
@@ -5167,6 +5377,35 @@ function OnlineParty({
               );
             })}
           </div>
+          {waitingSpectators.length > 0 && (
+            <section className="lobby-spectators" aria-label="관전자 대기열">
+              <div>
+                <strong>SPECTATORS</strong>
+                <span>
+                  {waitingSpectators.length}명 · 빈자리가 생기면 다음 경기부터
+                  자동 참가
+                </span>
+              </div>
+              <ul>
+                {waitingSpectators.map((player, index) => (
+                  <li key={player.id}>
+                    <span>W{index + 1}</span>
+                    <strong>{player.name}</strong>
+                    <em>{player.connected ? "CHATTING" : "RECONNECTING"}</em>
+                    {role === "host" && player.id !== localId && (
+                      <button
+                        className="kick-player"
+                        onClick={() => kickPlayer(player.id)}
+                        aria-label={`${player.name} 내보내기`}
+                      >
+                        KICK
+                      </button>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
           <p className="lobby-rules">
             <strong>HOST RULES</strong>
             <span>
@@ -5201,9 +5440,9 @@ function OnlineParty({
             <button
               className="start-online"
               onClick={startMatch}
-              disabled={players.filter((player) => player.connected).length < 2}
+              disabled={connectedCompetitorCount < 2}
             >
-              {players.filter((player) => player.connected).length < 2
+              {connectedCompetitorCount < 2
                 ? "한 명 이상 기다리는 중…"
                 : "START MATCH →"}
             </button>
@@ -5232,7 +5471,7 @@ function OnlineParty({
         <div>
           <span>SURVIVORS</span>
           <strong>
-            {survivors} / {players.length}
+            {survivors} / {competitors.length}
           </strong>
         </div>
         <button onClick={() => leaveRoom()}>LEAVE</button>
@@ -5461,7 +5700,6 @@ function OnlineParty({
             value={chatText}
             onChange={setChatText}
             onSend={sendChat}
-            globalShortcut={false}
           />
         </div>
       )}
