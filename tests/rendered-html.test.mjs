@@ -203,7 +203,7 @@ test("ships without starter-only assets", async () => {
   assert.match(gameClient, /selectedItemTarget/);
   assert.match(
     gameClient,
-    /\(!matchRules\.itemsEnabled &&\s*matchRules\.targetMode !== "manual"\)/,
+    /\(!canUseRevenge &&\s*!matchRules\.itemsEnabled &&\s*matchRules\.targetMode !== "manual"\)/,
   );
   assert.match(gameClient, /selectInventoryItem/);
   assert.match(gameClient, /event\.code === "KeyQ"/);
@@ -329,11 +329,13 @@ test("ships without starter-only assets", async () => {
     /const rescueActive = pieceCells\(active\)\.some\(\(\[, y\]\) => y < BUFFER_ROWS\)/,
   );
   assert.match(gameClient, /const DANGER_VISIBLE_ROWS = 7/);
-  assert.match(gameClient, /VERSUS_SPEED_STEP_SECONDS = 20/);
-  assert.match(gameClient, /VERSUS_SPEED_STEP_MS = 70/);
-  assert.match(gameClient, /VERSUS_MIN_GRAVITY_MS = 70/);
+  assert.match(gameClient, /VERSUS_SPEED_STEP_SECONDS = 15/);
+  assert.match(gameClient, /VERSUS_SPEED_STEP_MS = 75/);
+  assert.match(gameClient, /VERSUS_MIN_GRAVITY_MS = 50/);
   assert.doesNotMatch(gameClient, /MULTIPLAYER_DEFAULT_GRAVITY_MS/);
-  assert.match(gameClient, /GRAVITY_HEARTBEAT_MS = 32/);
+  assert.match(gameClient, /GRAVITY_HEARTBEAT_MS = 16/);
+  assert.match(gameClient, /DANGER_ENTRY_PREVIEW_MS = 180/);
+  assert.match(gameClient, /pieceSpawnedAtRef/);
   assert.match(gameClient, /stepDownRef\.current\(\)/);
   assert.doesNotMatch(
     gameClient,
@@ -367,12 +369,19 @@ test("ships without starter-only assets", async () => {
   assert.match(gameClient, /onAttack\?\.\(attack, nextCombo \+ 1\)/);
   assert.match(gameClient, /type: "attack"; amount: number; comboChain\?: number/);
   assert.match(gameClient, /type: "garbage"; id: number; amount: number; comboChain\?: number/);
+  assert.match(gameClient, /type: "revenge-use"/);
+  assert.match(gameClient, /revengeEnabled: false/);
+  assert.match(gameClient, /const routeRevenge/);
+  assert.match(gameClient, /revengeUsesRef/);
   assert.match(gameClient, /\| \{ type: "kicked" \}/);
   assert.match(gameClient, /const kickPlayer = \(playerId: string\)/);
   assert.match(gameClient, /className="kick-player"/);
   assert.match(gameClient, /"RECONNECTING"/);
   assert.match(gameClient, /sendRealtimePacket\(\{ type: "leave" \}\)/);
-  assert.match(gameClient, /targetMode: "cycle",\s*itemsEnabled: false,/);
+  assert.match(
+    gameClient,
+    /targetMode: "cycle",\s*revengeEnabled: false,\s*itemsEnabled: false,/,
+  );
   assert.doesNotMatch(
     gameClient,
     /nextScreen === "versus"[\s\S]{0,300}gravity:/,
@@ -396,6 +405,9 @@ test("ships without starter-only assets", async () => {
   assert.match(gameClient, /공격 블록이 한계선을 넘었습니다/);
   assert.match(gameClient, /winner-reveal-loss/);
   assert.match(gameClient, /className=\{`item-launch-effect/);
+  assert.match(gameClient, /className="garbage-launch-effect"/);
+  assert.match(gameClient, /launchGarbageProjectile/);
+  assert.match(gameClient, /className=\{`revenge-panel/);
   assert.match(gameClient, /rules=\{\{ \.\.\.rules, itemsEnabled: false \}\}/);
   assert.match(gameClient, /garbageAppliedTotalRef/);
   assert.match(gameClient, /const liftedActive/);
@@ -449,7 +461,11 @@ test("ships without starter-only assets", async () => {
   assert.match(globalCss, /@keyframes topout-fragment/);
   assert.match(globalCss, /\.combo-attack-effect/);
   assert.match(globalCss, /\.item-launch-effect/);
+  assert.match(globalCss, /\.garbage-launch-effect/);
+  assert.match(globalCss, /@keyframes garbage-projectile-flight/);
+  assert.match(globalCss, /\.revenge-panel/);
   assert.match(globalCss, /\.buffer-zone-danger/);
+  assert.match(globalCss, /@keyframes danger-piece-preview/);
   assert.match(globalCss, /grid-template-rows: repeat\(20, 1fr\)/);
   assert.match(globalCss, /\.matchup-list/);
   assert.match(

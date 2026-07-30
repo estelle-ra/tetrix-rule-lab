@@ -29,6 +29,7 @@ type Status = "playing" | "paused" | "won" | "lost";
 type Screen = "home" | "sprint" | "blitz" | "zen" | "versus";
 type GameTheme = "megacity" | "orbit" | "refinery";
 type FinishReason = "topout" | "garbage";
+type RevengeAttackKind = "garbage" | "odd";
 type GameAction =
   | "left"
   | "right"
@@ -67,6 +68,7 @@ type Rules = {
   attack: number;
   ghost: boolean;
   targetMode: "cycle" | "random" | "all" | "manual";
+  revengeEnabled: boolean;
   itemsEnabled: boolean;
   itemMode: "stock" | "blocks";
   itemPool: ItemType[];
@@ -113,6 +115,8 @@ type RoomPlayer = {
 
 type AttackLog = {
   id: string;
+  fromId?: string;
+  toId?: string;
   fromName: string;
   toName: string;
   amount: number;
@@ -154,6 +158,11 @@ type RoomPacket =
   | { type: "attack"; amount: number; comboChain?: number }
   | { type: "garbage"; id: number; amount: number; comboChain?: number }
   | { type: "target-select"; targetId: string }
+  | {
+      type: "revenge-use";
+      kind: RevengeAttackKind;
+      targetId: string;
+    }
   | { type: "item-use"; item: ItemType; targetId: string }
   | { type: "ink"; id: number }
   | { type: "ink-state"; playerId: string; until: number }
@@ -236,10 +245,11 @@ const MOBILE_BUTTON_ARR_MS = 58;
 const INK_EFFECT_MS = 4200;
 const SPEED_EFFECT_MS = 7000;
 const SPIN_EFFECT_MS = 5000;
-const VERSUS_SPEED_STEP_SECONDS = 20;
-const VERSUS_SPEED_STEP_MS = 70;
-const VERSUS_MIN_GRAVITY_MS = 70;
-const GRAVITY_HEARTBEAT_MS = 32;
+const VERSUS_SPEED_STEP_SECONDS = 15;
+const VERSUS_SPEED_STEP_MS = 75;
+const VERSUS_MIN_GRAVITY_MS = 50;
+const GRAVITY_HEARTBEAT_MS = 16;
+const DANGER_ENTRY_PREVIEW_MS = 180;
 const GARBAGE_QUEUE_DELAY_MS = 3500;
 const MAX_GARBAGE_QUEUE = 40;
 const MAX_ITEM_INVENTORY = 30;
@@ -365,6 +375,7 @@ const DEFAULT_RULES: Rules = {
   attack: 1,
   ghost: true,
   targetMode: "cycle",
+  revengeEnabled: false,
   itemsEnabled: false,
   itemMode: "stock",
   itemPool: [...ITEM_TYPES],
@@ -756,6 +767,7 @@ function GameBoard({
   const groundedLimitRef = useRef<number | null>(null);
   const lockResetCount = useRef(0);
   const pieceGenerationRef = useRef(0);
+  const pieceSpawnedAtRef = useRef(0);
   const lastActionWasRotation = useRef(false);
   const lastRotationKickIndex = useRef(-1);
   const lastGarbageAtRef = useRef(0);
@@ -781,6 +793,10 @@ function GameBoard({
   useEffect(() => {
     activeRef.current = active;
   }, [active]);
+
+  useEffect(() => {
+    pieceSpawnedAtRef.current = window.performance.now();
+  }, []);
 
   useEffect(() => {
     if (mode !== "versus" || !matchOutcome) return;
@@ -917,6 +933,7 @@ function GameBoard({
 
       boardRef.current = cleaned;
       activeRef.current = nextPiece;
+      pieceSpawnedAtRef.current = window.performance.now();
       setBoard(cleaned);
       setBoardItems(remainingItems);
       setActive(nextPiece);
@@ -1030,6 +1047,16 @@ function GameBoard({
 
   const stepDown = useCallback(() => {
     if (status !== "playing") return;
+    const nearTop = boardRef.current
+      .slice(0, BUFFER_ROWS + DANGER_VISIBLE_ROWS)
+      .some((row) => row.some(Boolean));
+    if (
+      nearTop &&
+      window.performance.now() - pieceSpawnedAtRef.current <
+        DANGER_ENTRY_PREVIEW_MS
+    ) {
+      return;
+    }
     const currentActive = activeRef.current;
     const moved = { ...currentActive, y: currentActive.y + 1 };
     if (!collides(boardRef.current, moved)) {
@@ -1062,7 +1089,7 @@ function GameBoard({
     const timer = window.setInterval(() => {
       const now = window.performance.now();
       const gravity = speedActive
-        ? Math.max(55, normalGravity * 0.24)
+        ? Math.max(28, normalGravity * 0.24)
         : normalGravity;
       if (now - lastDropAt < gravity) return;
       lastDropAt = now;
@@ -1417,6 +1444,7 @@ function GameBoard({
       }
       setHeld(active.type);
       activeRef.current = nextPiece;
+      pieceSpawnedAtRef.current = window.performance.now();
       setActive(nextPiece);
     } else {
       const replenished = nextQueue(queue, pieceRandomRef.current);
@@ -1432,6 +1460,7 @@ function GameBoard({
       }
       setHeld(active.type);
       activeRef.current = nextPiece;
+      pieceSpawnedAtRef.current = window.performance.now();
       setActive(nextPiece);
       setQueue(replenished.slice(1));
     }
@@ -2355,6 +2384,8 @@ function RemoteBoard({
   const visibleEffect = effect ?? player.snapshot?.effect ?? null;
   return (
     <article
+      id={`remote-player-${player.id}`}
+      data-player-id={player.id}
       className={`remote-player ${!player.alive ? "remote-player-out" : ""} ${isSelf ? "remote-player-self" : ""} ${selected ? "remote-player-selected" : ""} ${targeting ? "remote-player-targetable" : ""} ${inked ? "remote-player-inked" : ""} ${visibleEffect ? `remote-player-effect-${visibleEffect}` : ""}`}
       onClick={targeting ? onSelect : undefined}
     >
@@ -2503,6 +2534,20 @@ function OnlineParty({
     item: ItemType;
     targetName: string;
   } | null>(null);
+  const [garbageLaunchEffects, setGarbageLaunchEffects] = useState<
+    Array<{
+      id: string;
+      amount: number;
+      targetName: string;
+      startX: number;
+      startY: number;
+      midX: number;
+      midY: number;
+      endX: number;
+      endY: number;
+    }>
+  >([]);
+  const [localRevengeUsed, setLocalRevengeUsed] = useState(false);
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [chatText, setChatText] = useState("");
   const [countdownValue, setCountdownValue] = useState(3);
@@ -2546,6 +2591,7 @@ function OnlineParty({
   const targetCursor = useRef(0);
   const manualTargetsRef = useRef(new Map<string, string>());
   const itemUsesRef = useRef(new Map<string, number>());
+  const revengeUsesRef = useRef(new Set<string>());
   const itemInventoryRef = useRef<ItemType[]>([]);
   const shortcutSelectTargetRef = useRef<(targetId: string) => void>(
     () => undefined,
@@ -2592,6 +2638,7 @@ function OnlineParty({
       match?.querySelector<HTMLElement>(".item-inventory"),
       match?.querySelector<HTMLElement>(".mobile-opponent-strip"),
       match?.querySelector<HTMLElement>(".mobile-match-chat"),
+      match?.querySelector<HTMLElement>(".revenge-panel"),
     ].forEach((element) => {
       if (element) resizeObserver.observe(element);
     });
@@ -2692,6 +2739,7 @@ function OnlineParty({
     replacePendingGarbage(0);
     pendingGarbageComboRef.current = 0;
     setItemLaunchEffect(null);
+    setGarbageLaunchEffects([]);
     setWinnerId(nextWinnerId);
     setWinnerName(nextWinnerName);
     setMatchEndedAt(endedAt);
@@ -2777,8 +2825,78 @@ function OnlineParty({
     setChatMessages(next);
   };
 
+  const launchGarbageProjectile = (log: AttackLog) => {
+    if (!log.toId || log.kind !== "garbage") return;
+    window.requestAnimationFrame(() => {
+      const sourceCandidates = [
+        onlineArenaRef.current?.querySelector<HTMLElement>(
+          ".local-board-zone .board-shell",
+        ),
+        document.querySelector<HTMLElement>(".revenge-panel"),
+      ];
+      const targetCandidates = [
+        document.getElementById(`remote-player-${log.toId}`),
+        document.getElementById(`mobile-player-${log.toId}`),
+      ];
+      const visibleElement = (elements: Array<HTMLElement | null | undefined>) =>
+        elements.find((element) => {
+          if (!element) return false;
+          const rect = element.getBoundingClientRect();
+          return rect.width > 0 && rect.height > 0;
+        });
+      const source = visibleElement(sourceCandidates);
+      const target = visibleElement(targetCandidates);
+      if (!source || !target) return;
+      const sourceRect = source.getBoundingClientRect();
+      const targetRect = target.getBoundingClientRect();
+      const effect = {
+        id: `${log.id}-projectile`,
+        amount: log.amount,
+        targetName: log.toName,
+        startX: sourceRect.left + sourceRect.width * 0.72,
+        startY: sourceRect.top + sourceRect.height * 0.32,
+        midX:
+          sourceRect.left +
+          sourceRect.width * 0.72 +
+          (targetRect.left +
+            targetRect.width * 0.5 -
+            (sourceRect.left + sourceRect.width * 0.72)) *
+            0.63,
+        midY:
+          sourceRect.top +
+          sourceRect.height * 0.32 +
+          (targetRect.top +
+            targetRect.height * 0.42 -
+            (sourceRect.top + sourceRect.height * 0.32)) *
+            0.45 -
+          28,
+        endX: targetRect.left + targetRect.width * 0.5,
+        endY: targetRect.top + targetRect.height * 0.42,
+      };
+      setGarbageLaunchEffects((current) =>
+        [...current.filter((candidate) => candidate.id !== effect.id), effect].slice(
+          -6,
+        ),
+      );
+      window.setTimeout(() => {
+        setGarbageLaunchEffects((current) =>
+          current.filter((candidate) => candidate.id !== effect.id),
+        );
+      }, 1050);
+    });
+  };
+
   const appendAttackLog = (log: AttackLog) => {
-    setAttackLogs((current) => [...current, log].slice(-5));
+    setAttackLogs((current) =>
+      [...current.filter((item) => item.id !== log.id), log].slice(-5),
+    );
+    if (
+      log.kind === "garbage" &&
+      log.fromId === localIdRef.current &&
+      log.toId
+    ) {
+      launchGarbageProjectile(log);
+    }
     window.setTimeout(() => {
       setAttackLogs((current) => current.filter((item) => item.id !== log.id));
     }, 4200);
@@ -3140,6 +3258,8 @@ function OnlineParty({
       }
       const log: AttackLog = {
         id: `${packet.id}-${fromId}-${target.id}`,
+        fromId,
+        toId: target.id,
         fromName: sender,
         toName: target.name,
         amount,
@@ -3207,10 +3327,92 @@ function OnlineParty({
     broadcast({ type: "item-state", playerId: target.id, item, until });
     const log: AttackLog = {
       id: `${item}-${id}-${fromId}-${target.id}`,
+      fromId,
+      toId: target.id,
       fromName: sender.name,
       toName: target.name,
       amount: 0,
       kind: item,
+    };
+    appendAttackLog(log);
+    broadcast({ type: "attack-log", log });
+  };
+
+  const routeRevenge = (
+    fromId: string,
+    targetId: string,
+    kind: RevengeAttackKind,
+  ) => {
+    if (
+      phaseRef.current !== "playing" ||
+      !rulesRef.current.revengeEnabled ||
+      revengeUsesRef.current.has(fromId)
+    ) {
+      return;
+    }
+    const sender = playersRef.current.find(
+      (player) =>
+        player.id === fromId &&
+        !player.alive &&
+        !player.spectating &&
+        player.connected,
+    );
+    const target = playersRef.current.find(
+      (player) =>
+        player.id === targetId &&
+        player.id !== fromId &&
+        player.alive &&
+        player.connected,
+    );
+    if (!sender || !target) return;
+    revengeUsesRef.current.add(fromId);
+    const id = Date.now();
+    if (kind === "garbage") {
+      const packet: RoomPacket = {
+        type: "garbage",
+        id,
+        amount: 2,
+        comboChain: 0,
+      };
+      if (target.id === localIdRef.current) {
+        enqueueGarbage(2, 0);
+      } else if (realtimeChannelRef.current) {
+        sendRealtimePacket(packet, target.id);
+      } else {
+        const connection = connectionsRef.current.get(target.id);
+        if (connection?.open) connection.send(packet);
+      }
+    } else {
+      const packet = {
+        type: "item-effect",
+        id,
+        item: "odd",
+      } satisfies RoomPacket;
+      if (target.id === localIdRef.current) {
+        setItemEffectSignal({ id, item: "odd" });
+      } else if (realtimeChannelRef.current) {
+        sendRealtimePacket(packet, target.id);
+      } else {
+        const connection = connectionsRef.current.get(target.id);
+        if (connection?.open) connection.send(packet);
+      }
+      const until = Date.now() + 1400;
+      markPlayerItemEffect(target.id, "odd", until);
+      broadcast({
+        type: "item-state",
+        playerId: target.id,
+        item: "odd",
+        until,
+      });
+    }
+    const log: AttackLog = {
+      id: `revenge-${kind}-${id}-${fromId}-${target.id}`,
+      fromId,
+      toId: target.id,
+      fromName: sender.name,
+      toName: target.name,
+      amount: kind === "garbage" ? 2 : 0,
+      kind: kind === "garbage" ? "garbage" : "odd",
     };
     appendAttackLog(log);
     broadcast({ type: "attack-log", log });
@@ -3338,6 +3540,9 @@ function OnlineParty({
     }
     if (packet.type === "target-select") {
       manualTargetsRef.current.set(senderId, packet.targetId);
+    }
+    if (packet.type === "revenge-use") {
+      routeRevenge(senderId, packet.targetId, packet.kind);
     }
     if (packet.type === "item-use") {
       routeItem(senderId, packet.targetId, packet.item);
@@ -3534,6 +3739,7 @@ function OnlineParty({
       setWinnerName("");
       setShowResultCard(false);
       setLocalEndReason("topout");
+      setLocalRevengeUsed(false);
       clearGarbageQueueTimer();
       setPendingGarbageDeadline(0);
       replacePendingGarbage(0);
@@ -3602,6 +3808,7 @@ function OnlineParty({
       setMatchEndedAt(0);
       setShowResultCard(false);
       setSelectedTargetId("");
+      setLocalRevengeUsed(false);
       replaceItemInventory([]);
       setAttackLogs([]);
       setInkSignal({ id: 0 });
@@ -4097,6 +4304,8 @@ function OnlineParty({
     replacePendingGarbage(0);
     pendingGarbageComboRef.current = 0;
     setItemLaunchEffect(null);
+    setGarbageLaunchEffects([]);
+    setLocalRevengeUsed(false);
     setGarbageSignal({ id: 0, amount: 0, comboChain: 0 });
     setInkSignal({ id: 0 });
     setItemEffectSignal(null);
@@ -4118,6 +4327,7 @@ function OnlineParty({
       }));
     manualTargetsRef.current.clear();
     itemUsesRef.current.clear();
+    revengeUsesRef.current.clear();
     setSelectedTargetId("");
     setAttackLogs([]);
     setWinnerId("");
@@ -4165,6 +4375,8 @@ function OnlineParty({
     clearResultReveal();
     manualTargetsRef.current.clear();
     itemUsesRef.current.clear();
+    revengeUsesRef.current.clear();
+    setLocalRevengeUsed(false);
     setSelectedTargetId("");
     replaceItemInventory(
       startingItemInventory(rulesRef.current, nextMatchId),
@@ -4191,6 +4403,7 @@ function OnlineParty({
     replacePendingGarbage(0);
     pendingGarbageComboRef.current = 0;
     setItemLaunchEffect(null);
+    setGarbageLaunchEffects([]);
     setGarbageSignal({ id: 0, amount: 0, comboChain: 0 });
     broadcast({
       type: "start",
@@ -4325,6 +4538,60 @@ function OnlineParty({
     }
   };
 
+  const activateRevenge = (
+    targetId: string,
+    kind: RevengeAttackKind,
+  ) => {
+    const sender = playersRef.current.find(
+      (player) => player.id === localIdRef.current,
+    );
+    const target = playersRef.current.find(
+      (player) =>
+        player.id === targetId &&
+        player.id !== localIdRef.current &&
+        player.alive &&
+        player.connected,
+    );
+    if (
+      !matchRules.revengeEnabled ||
+      localRevengeUsed ||
+      !sender ||
+      sender.alive ||
+      sender.spectating ||
+      !target
+    ) {
+      return;
+    }
+    setLocalRevengeUsed(true);
+    navigator.vibrate?.([35, 30, 55]);
+    if (kind === "odd") {
+      clearItemLaunchTimer();
+      const launch = {
+        id: Date.now(),
+        item: "odd" as const,
+        targetName: target.name,
+      };
+      setItemLaunchEffect(launch);
+      itemLaunchTimerRef.current = window.setTimeout(() => {
+        setItemLaunchEffect((current) =>
+          current?.id === launch.id ? null : current,
+        );
+        itemLaunchTimerRef.current = null;
+      }, 1250);
+    }
+    if (roleRef.current === "host") {
+      routeRevenge(localIdRef.current, targetId, kind);
+    } else if (realtimeChannelRef.current) {
+      sendRealtimePacket({ type: "revenge-use", kind, targetId });
+    } else if (hostConnectionRef.current?.open) {
+      hostConnectionRef.current.send({
+        type: "revenge-use",
+        kind,
+        targetId,
+      } satisfies RoomPacket);
+    }
+  };
+
   useEffect(() => {
     shortcutSelectTargetRef.current = selectTarget;
     shortcutItemRef.current = activateItem;
@@ -4442,6 +4709,8 @@ function OnlineParty({
     replacePendingGarbage(0);
     pendingGarbageComboRef.current = 0;
     setItemLaunchEffect(null);
+    setGarbageLaunchEffects([]);
+    setLocalRevengeUsed(false);
     setGarbageSignal({ id: 0, amount: 0, comboChain: 0 });
     connectionAttemptRef.current += 1;
     removeRealtimeChannel();
@@ -4474,6 +4743,7 @@ function OnlineParty({
     setPlayerItemEffects({});
     manualTargetsRef.current.clear();
     itemUsesRef.current.clear();
+    revengeUsesRef.current.clear();
     kickedPlayersRef.current.clear();
     chatMessagesRef.current = [];
     setChatMessages([]);
@@ -4521,6 +4791,14 @@ function OnlineParty({
     localPlayer && (!localPlayer.alive || localPlayer.spectating),
   );
   const isLateJoinSpectator = Boolean(localPlayer?.spectating);
+  const canUseRevenge = Boolean(
+    phase === "playing" &&
+      matchRules.revengeEnabled &&
+      localPlayer &&
+      !localPlayer.alive &&
+      !localPlayer.spectating &&
+      !localRevengeUsed,
+  );
   const inventoryCounts = ITEM_TYPES.reduce<Record<ItemType, number>>(
     (counts, item) => ({
       ...counts,
@@ -4538,6 +4816,10 @@ function OnlineParty({
         player.alive &&
         player.connected,
     ) ?? null;
+  const revengeTarget =
+    selectedItemTarget ??
+    remotePlayers.find((player) => player.alive && player.connected) ??
+    null;
   const survivors = players.filter(
     (player) => player.alive && player.connected,
   ).length;
@@ -4888,6 +5170,29 @@ function OnlineParty({
           <b aria-hidden="true" />
         </div>
       )}
+      {garbageLaunchEffects.map((effect) => (
+        <div
+          className="garbage-launch-effect"
+          key={effect.id}
+          aria-label={`${effect.targetName}에게 ${effect.amount}줄 공격 전송`}
+          style={
+            {
+              "--attack-start-x": `${effect.startX}px`,
+              "--attack-start-y": `${effect.startY}px`,
+              "--attack-mid-x": `${effect.midX}px`,
+              "--attack-mid-y": `${effect.midY}px`,
+              "--attack-end-x": `${effect.endX}px`,
+              "--attack-end-y": `${effect.endY}px`,
+            } as CSSProperties
+          }
+        >
+          <i>+{effect.amount}</i>
+          <span>{effect.targetName}</span>
+          {Array.from({ length: 5 }, (_, index) => (
+            <b key={index} style={{ "--trail-index": index } as CSSProperties} />
+          ))}
+        </div>
+      ))}
       {matchRules.itemsEnabled && !isLateJoinSpectator && (
         <div className="item-inventory" aria-label="보유 공격 아이템">
           <span>
@@ -4957,6 +5262,8 @@ function OnlineParty({
       <div className="mobile-opponent-strip" aria-label="상대 생존 목록">
         {remotePlayers.map((player) => (
           <article
+            id={`mobile-player-${player.id}`}
+            data-player-id={player.id}
             className={`mobile-opponent-card ${
               player.id === selectedTargetId ? "strip-selected" : ""
             } ${inkedPlayers[player.id] ? "card-inked" : ""} ${
@@ -4970,10 +5277,11 @@ function OnlineParty({
               aria-label={`${player.name} 공격 대상 선택`}
               className="mobile-target-select"
               disabled={
-                isSpectating ||
+                (isSpectating && !canUseRevenge) ||
                 !player.alive ||
                 !player.connected ||
-                (!matchRules.itemsEnabled &&
+                (!canUseRevenge &&
+                  !matchRules.itemsEnabled &&
                   matchRules.targetMode !== "manual")
               }
               onClick={() => selectTarget(player.id)}
@@ -4995,6 +5303,61 @@ function OnlineParty({
           </article>
         ))}
       </div>
+      {phase === "playing" &&
+        matchRules.revengeEnabled &&
+        isSpectating &&
+        !isLateJoinSpectator && (
+          <section
+            className={`revenge-panel ${
+              localRevengeUsed ? "revenge-panel-used" : ""
+            }`}
+            aria-label="탈락자 방해권"
+          >
+            <span>OUT PLAYER · ONE LAST CHANCE</span>
+            <div>
+              <strong>
+                {localRevengeUsed
+                  ? "방해권을 사용했습니다"
+                  : revengeTarget
+                    ? `TARGET · ${revengeTarget.name}`
+                    : "살아있는 상대가 없습니다"}
+              </strong>
+              <small>
+                {localRevengeUsed
+                  ? "남은 경기를 관전하며 채팅할 수 있습니다."
+                  : "상대 보드를 선택하고 한 가지 공격을 사용하세요."}
+              </small>
+            </div>
+            <button
+              type="button"
+              disabled={!canUseRevenge || !revengeTarget}
+              onClick={() => {
+                if (revengeTarget) {
+                  activateRevenge(revengeTarget.id, "garbage");
+                }
+              }}
+            >
+              <i>▥</i>
+              <span>
+                <strong>+2 LINES</strong>
+                <small>가비지 2줄</small>
+              </span>
+            </button>
+            <button
+              type="button"
+              disabled={!canUseRevenge || !revengeTarget}
+              onClick={() => {
+                if (revengeTarget) activateRevenge(revengeTarget.id, "odd");
+              }}
+            >
+              <i>✚</i>
+              <span>
+                <strong>ODD BLOCK</strong>
+                <small>다음 블록 방해</small>
+              </span>
+            </button>
+          </section>
+        )}
       {(phase !== "ended" || !showResultCard) && (
         <div className="mobile-match-chat">
           <PartyChat
@@ -5094,9 +5457,10 @@ function OnlineParty({
                 }
                 selected={player.id === selectedTargetId}
                 targeting={
-                  !isSpectating &&
-                  (matchRules.targetMode === "manual" ||
-                    matchRules.itemsEnabled) &&
+                  (canUseRevenge ||
+                    (!isSpectating &&
+                      (matchRules.targetMode === "manual" ||
+                        matchRules.itemsEnabled))) &&
                   player.alive &&
                   player.connected
                 }
@@ -5334,7 +5698,7 @@ function RulesPanel({
             </div>
             <small>
               {multiplayer
-                ? "방장이 정한 속도가 다음 경기부터 모두에게 적용됩니다. 경기 중 20초마다 70ms, 10줄마다 55ms 빨라지며 최소 70ms입니다."
+                ? "방장이 정한 속도가 다음 경기부터 모두에게 적용됩니다. 경기 중 15초마다 75ms, 10줄마다 55ms 빨라지며 최소 50ms입니다."
                 : "10줄을 지울 때마다 55ms 빨라지며, 최소 90ms입니다."}
             </small>
           </label>
@@ -5425,6 +5789,29 @@ function RulesPanel({
                 </select>
                 <small>전원 공격은 같은 가비지를 모든 생존 상대에게 보냅니다.</small>
               </label>
+              <button
+                className="switch-row"
+                onClick={() =>
+                  setRules({
+                    ...rules,
+                    revengeEnabled: !rules.revengeEnabled,
+                  })
+                }
+                aria-pressed={rules.revengeEnabled}
+              >
+                <span>
+                  <strong>탈락자 방해권</strong>
+                  <small>
+                    먼저 탈락한 플레이어가 경기당 한 번 +2줄 또는 괴상
+                    블록을 보냅니다.
+                  </small>
+                </span>
+                <span
+                  className={`switch ${
+                    rules.revengeEnabled ? "switch-on" : ""
+                  }`}
+                />
+              </button>
               <button
                 className="switch-row"
                 onClick={() =>
