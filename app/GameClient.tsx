@@ -256,6 +256,9 @@ const MAX_ITEM_INVENTORY = 30;
 // Eight players peak near 48 Realtime messages/s, leaving room for attacks and chat.
 const REALTIME_SNAPSHOT_UPLINK_MS = 400;
 const REALTIME_SNAPSHOT_BATCH_MS = 600;
+const REALTIME_SNAPSHOT_STALL_MS = 1800;
+const REALTIME_SNAPSHOT_FALLBACK_MS = 800;
+const REALTIME_SNAPSHOT_RETRY_MS = 1200;
 const PIECES: PieceName[] = ["I", "J", "L", "O", "S", "T", "Z"];
 const ITEM_TYPES: ItemType[] = ["ink", "speed", "odd", "spin", "star"];
 const ITEM_META: Record<
@@ -2382,11 +2385,12 @@ function RemoteBoard({
     (player.snapshot?.items ?? []).map((marker) => [marker.index, marker.item]),
   );
   const visibleEffect = effect ?? player.snapshot?.effect ?? null;
+  const snapshotReady = Boolean(player.snapshot);
   return (
     <article
       id={`remote-player-${player.id}`}
       data-player-id={player.id}
-      className={`remote-player ${!player.alive ? "remote-player-out" : ""} ${isSelf ? "remote-player-self" : ""} ${selected ? "remote-player-selected" : ""} ${targeting ? "remote-player-targetable" : ""} ${inked ? "remote-player-inked" : ""} ${visibleEffect ? `remote-player-effect-${visibleEffect}` : ""}`}
+      className={`remote-player ${!player.alive ? "remote-player-out" : ""} ${player.alive && player.connected && !snapshotReady ? "remote-player-syncing" : ""} ${isSelf ? "remote-player-self" : ""} ${selected ? "remote-player-selected" : ""} ${targeting ? "remote-player-targetable" : ""} ${inked ? "remote-player-inked" : ""} ${visibleEffect ? `remote-player-effect-${visibleEffect}` : ""}`}
       onClick={targeting ? onSelect : undefined}
     >
       <div className="remote-player-head">
@@ -2408,7 +2412,9 @@ function RemoteBoard({
                 ? "INKED"
                 : visibleEffect
                   ? ITEM_META[visibleEffect].short
-                : "LIVE"
+                : snapshotReady
+                  ? "LIVE"
+                  : "SYNCING"
               : "OFFLINE"
             : "OUT"}
         </em>
@@ -2558,6 +2564,10 @@ function OnlineParty({
   const realtimeChannelRef = useRef<RealtimeChannel | null>(null);
   const realtimeSnapshotUplinkRef = useRef<RealtimeChannel | null>(null);
   const realtimeSnapshotUplinkReadyRef = useRef(false);
+  const realtimeSnapshotUplinkRetryTimerRef = useRef<number | null>(null);
+  const realtimeSnapshotAckAtRef = useRef(0);
+  const realtimeSnapshotFallbackSentAtRef = useRef(0);
+  const realtimeSnapshotFallbackModeRef = useRef(false);
   const realtimeSnapshotChannelsRef = useRef<Map<string, RealtimeChannel>>(
     new Map(),
   );
@@ -2966,13 +2976,35 @@ function OnlineParty({
     });
   };
 
+  const sendRealtimeSnapshotFallback = (snapshot: GameSnapshot) => {
+    const now = Date.now();
+    if (
+      now - realtimeSnapshotFallbackSentAtRef.current <
+      REALTIME_SNAPSHOT_FALLBACK_MS
+    ) {
+      return;
+    }
+    realtimeSnapshotFallbackSentAtRef.current = now;
+    sendRealtimePacket(
+      { type: "snapshot", snapshot },
+      realtimeHostIdRef.current || undefined,
+    );
+  };
+
   const realtimeSnapshotTopic = (code: string, playerId: string) =>
     `tetstar-snapshot-${code.toLowerCase()}-${playerId}`;
 
   const removeRealtimeSnapshotUplink = () => {
+    if (realtimeSnapshotUplinkRetryTimerRef.current !== null) {
+      window.clearTimeout(realtimeSnapshotUplinkRetryTimerRef.current);
+      realtimeSnapshotUplinkRetryTimerRef.current = null;
+    }
     const channel = realtimeSnapshotUplinkRef.current;
     realtimeSnapshotUplinkRef.current = null;
     realtimeSnapshotUplinkReadyRef.current = false;
+    realtimeSnapshotAckAtRef.current = 0;
+    realtimeSnapshotFallbackSentAtRef.current = 0;
+    realtimeSnapshotFallbackModeRef.current = false;
     if (channel && supabase) void supabase.removeChannel(channel);
   };
 
@@ -3049,6 +3081,32 @@ function OnlineParty({
     channel.subscribe((status) => {
       if (realtimeSnapshotUplinkRef.current !== channel) return;
       realtimeSnapshotUplinkReadyRef.current = status === "SUBSCRIBED";
+      if (
+        status !== "CHANNEL_ERROR" &&
+        status !== "TIMED_OUT" &&
+        status !== "CLOSED"
+      ) {
+        return;
+      }
+      realtimeSnapshotUplinkRef.current = null;
+      if (supabase) void supabase.removeChannel(channel);
+      if (
+        roleRef.current !== "guest" ||
+        !roomCodeRef.current ||
+        !localIdRef.current
+      ) {
+        return;
+      }
+      if (realtimeSnapshotUplinkRetryTimerRef.current !== null) {
+        window.clearTimeout(realtimeSnapshotUplinkRetryTimerRef.current);
+      }
+      realtimeSnapshotUplinkRetryTimerRef.current = window.setTimeout(() => {
+        realtimeSnapshotUplinkRetryTimerRef.current = null;
+        ensureRealtimeSnapshotUplink(
+          roomCodeRef.current,
+          localIdRef.current,
+        );
+      }, REALTIME_SNAPSHOT_RETRY_MS);
     });
   };
 
@@ -3448,6 +3506,7 @@ function OnlineParty({
     }
     if (packet.type === "join-request") {
       if (playersRef.current.some((player) => player.id === senderId)) {
+        ensureRealtimeSnapshotHostChannel(senderId);
         sendRealtimePacket(
           {
             type: "welcome",
@@ -3706,6 +3765,9 @@ function OnlineParty({
     if (packet.type === "welcome") {
       clearConnectionTimeout();
       setConnectionStatus("");
+      realtimeSnapshotAckAtRef.current = Date.now();
+      realtimeSnapshotFallbackSentAtRef.current = 0;
+      realtimeSnapshotFallbackModeRef.current = false;
       localIdRef.current = packet.selfId;
       setLocalId(packet.selfId);
       replacePlayers(packet.players);
@@ -3728,6 +3790,9 @@ function OnlineParty({
     }
     if (packet.type === "start") {
       clearResultReveal();
+      realtimeSnapshotAckAtRef.current = Date.now();
+      realtimeSnapshotFallbackSentAtRef.current = 0;
+      realtimeSnapshotFallbackModeRef.current = false;
       replacePlayers(packet.players);
       rulesRef.current = packet.rules;
       setMatchRules(packet.rules);
@@ -3764,6 +3829,9 @@ function OnlineParty({
           snapshot,
         ]),
       );
+      if (snapshotMap.has(localIdRef.current)) {
+        realtimeSnapshotAckAtRef.current = Date.now();
+      }
       const next = playersRef.current.map((player) => {
         const snapshot = snapshotMap.get(player.id);
         return snapshot ? { ...player, snapshot } : player;
@@ -3809,6 +3877,9 @@ function OnlineParty({
       setShowResultCard(false);
       setSelectedTargetId("");
       setLocalRevengeUsed(false);
+      realtimeSnapshotAckAtRef.current = Date.now();
+      realtimeSnapshotFallbackSentAtRef.current = 0;
+      realtimeSnapshotFallbackModeRef.current = false;
       replaceItemInventory([]);
       setAttackLogs([]);
       setInkSignal({ id: 0 });
@@ -4427,12 +4498,35 @@ function OnlineParty({
         player.id === id ? { ...player, snapshot } : player,
       );
       const uplink = realtimeSnapshotUplinkRef.current;
+      const uplinkReady =
+        Boolean(uplink) && realtimeSnapshotUplinkReadyRef.current;
+      if (
+        !uplinkReady ||
+        Date.now() - realtimeSnapshotAckAtRef.current >
+          REALTIME_SNAPSHOT_STALL_MS
+      ) {
+        realtimeSnapshotFallbackModeRef.current = true;
+      }
       if (uplink && realtimeSnapshotUplinkReadyRef.current) {
-        void uplink.send({
-          type: "broadcast",
-          event: "snapshot",
-          payload: { playerId: id, snapshot },
-        });
+        void uplink
+          .send({
+            type: "broadcast",
+            event: "snapshot",
+            payload: { playerId: id, snapshot },
+          })
+          .then((result) => {
+            if (result !== "ok") {
+              realtimeSnapshotFallbackModeRef.current = true;
+              sendRealtimeSnapshotFallback(snapshot);
+            }
+          })
+          .catch(() => {
+            realtimeSnapshotFallbackModeRef.current = true;
+            sendRealtimeSnapshotFallback(snapshot);
+          });
+      }
+      if (realtimeSnapshotFallbackModeRef.current) {
+        sendRealtimeSnapshotFallback(snapshot);
       }
       return;
     }
@@ -5296,7 +5390,9 @@ function OnlineParty({
                       ? "INKED"
                       : playerItemEffects[player.id]
                         ? ITEM_META[playerItemEffects[player.id].item].short
-                        : "LIVE"
+                        : player.snapshot
+                          ? "LIVE"
+                          : "SYNCING"
                   : "OUT"}
               </em>
             </button>

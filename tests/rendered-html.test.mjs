@@ -421,15 +421,22 @@ test("ships without starter-only assets", async () => {
   assert.match(gameClient, /SUPABASE REALTIME/);
   assert.match(gameClient, /REALTIME_SNAPSHOT_UPLINK_MS = 400/);
   assert.match(gameClient, /REALTIME_SNAPSHOT_BATCH_MS = 600/);
+  assert.match(gameClient, /REALTIME_SNAPSHOT_STALL_MS = 1800/);
+  assert.match(gameClient, /REALTIME_SNAPSHOT_FALLBACK_MS = 800/);
+  assert.match(gameClient, /REALTIME_SNAPSHOT_RETRY_MS = 1200/);
   assert.match(gameClient, /tetstar-snapshot-\$\{code\.toLowerCase\(\)\}/);
   assert.match(gameClient, /broadcast: \{ ack: false \}/);
   assert.match(gameClient, /queueRealtimeSnapshot/);
   assert.match(gameClient, /sendRealtimePacket\(\{ type: "snapshots", snapshots \}\)/);
+  assert.match(gameClient, /sendRealtimeSnapshotFallback/);
+  assert.match(gameClient, /realtimeSnapshotFallbackModeRef/);
+  assert.match(gameClient, /snapshotMap\.has\(localIdRef\.current\)/);
+  assert.match(gameClient, /"SYNCING"/);
   assert.match(gameClient, /onSnapshotRef\.current = onSnapshot/);
   assert.match(gameClient, /snapshotIntervalMs - \(now - snapshotSentAt\.current\)/);
-  assert.doesNotMatch(
+  assert.match(
     gameClient,
-    /sendRealtimePacket\(\{ type: "snapshot", snapshot \}\)/,
+    /sendRealtimePacket\(\s*\{ type: "snapshot", snapshot \},\s*realtimeHostIdRef\.current \|\| undefined/,
   );
   assert.match(globalCss, /calc\(\(100dvh - 146px\) \/ 25\)/);
   assert.match(globalCss, /calc\(\(100dvh - 260px\) \/ 25\)/);
@@ -461,6 +468,8 @@ test("ships without starter-only assets", async () => {
   assert.match(globalCss, /@keyframes topout-fragment/);
   assert.match(globalCss, /\.combo-attack-effect/);
   assert.match(globalCss, /\.item-launch-effect/);
+  assert.match(globalCss, /\.remote-player-syncing/);
+  assert.match(globalCss, /@keyframes remote-board-sync/);
   assert.match(globalCss, /\.garbage-launch-effect/);
   assert.match(globalCss, /@keyframes garbage-projectile-flight/);
   assert.match(globalCss, /\.revenge-panel/);

@@ -2556,6 +2556,28 @@ button.online-choice:hover {
   position: relative;
 }
 
+.remote-player-syncing {
+  border-color: rgba(67, 213, 232, 0.46);
+}
+
+.remote-player-syncing .remote-player-head em {
+  animation: remote-sync-pulse 900ms ease-in-out infinite alternate;
+  color: var(--cyan);
+}
+
+.remote-player-syncing .remote-board {
+  background:
+    linear-gradient(
+      110deg,
+      rgba(67, 213, 232, 0.02) 30%,
+      rgba(67, 213, 232, 0.09) 50%,
+      rgba(67, 213, 232, 0.02) 70%
+    ),
+    #060708;
+  background-size: 220% 100%;
+  animation: remote-board-sync 1.2s linear infinite;
+}
+
 .remote-player-targetable {
   cursor: crosshair;
 }
@@ -3031,6 +3053,16 @@ button.online-choice:hover {
   0% { opacity: 0; transform: translateX(20px); }
   8%, 78% { opacity: 1; transform: translateX(0); }
   100% { opacity: 0; transform: translateX(8px); }
+}
+
+@keyframes remote-sync-pulse {
+  from { opacity: 0.45; }
+  to { opacity: 1; }
+}
+
+@keyframes remote-board-sync {
+  from { background-position: 160% 0; }
+  to { background-position: -60% 0; }
 }
 
 @keyframes item-launch-card {
