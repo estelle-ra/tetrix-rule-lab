@@ -252,6 +252,10 @@ test("ships without starter-only assets", async () => {
   );
   assert.match(gameClient, /window\.visualViewport/);
   assert.match(gameClient, /--visual-viewport-height/);
+  assert.match(gameClient, /Math\.min\(window\.innerHeight, viewport\?\.height/);
+  assert.match(gameClient, /const gameRigRef/);
+  assert.match(gameClient, /controlsTop - rigTop - 6/);
+  assert.match(gameClient, /window\.addEventListener\("pageshow"/);
   assert.match(gameClient, /onlineArenaRef/);
   assert.match(gameClient, /new ResizeObserver\(updateBoardSpace\)/);
   assert.match(gameClient, /controlsTop - arenaTop - 18/);
@@ -519,6 +523,11 @@ test("ships without starter-only assets", async () => {
   assert.match(globalCss, /\.touch-step/);
   assert.match(globalCss, /var\(--visual-viewport-height\)/);
   assert.match(globalCss, /--mobile-board-space/);
+  assert.match(
+    globalCss,
+    /\.mobile-controls \{[\s\S]*position: fixed;[\s\S]*--visual-viewport-top/,
+  );
+  assert.doesNotMatch(globalCss, /calc\(\(100dvh - 390px\) \/ 25\)/);
   assert.match(globalCss, /310px/);
   assert.doesNotMatch(gameClient, /online-mode-label/);
   assert.match(gameClient, /GAME_THEMES/);

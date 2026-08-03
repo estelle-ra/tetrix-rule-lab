@@ -5621,10 +5621,20 @@ footer {
 
   .game-rig {
     --cell: clamp(
-      14px,
+      10px,
       min(
         calc((100vw - 150px) / 10),
-        calc((var(--visual-viewport-height) - 210px) / 25)
+        calc(
+          var(
+              --mobile-board-space,
+              calc(
+                var(--visual-viewport-height) -
+                  210px -
+                  env(safe-area-inset-bottom)
+              )
+            ) /
+            25
+        )
       ),
       26px
     );
@@ -5734,7 +5744,7 @@ footer {
     align-items: stretch;
     background: rgba(12, 14, 17, 0.94);
     border: 1px solid #30353d;
-    bottom: 6px;
+    bottom: auto;
     display: grid;
     gap: 8px;
     grid-template-columns: minmax(0, 1.45fr) minmax(132px, 0.8fr);
@@ -5742,7 +5752,15 @@ footer {
     max-width: 510px;
     min-height: 130px;
     padding: 7px;
-    position: sticky;
+    position: fixed;
+    left: 4px;
+    right: 4px;
+    top: calc(
+      var(--visual-viewport-top) +
+        var(--visual-viewport-height) -
+        136px -
+        env(safe-area-inset-bottom)
+    );
     touch-action: none;
     width: calc(100% - 8px);
     z-index: 18;
@@ -6022,9 +6040,22 @@ footer {
 
   .game-rig {
     --cell: clamp(
-      17px,
-      min(8.5vw, calc((100dvh - 390px) / 25)),
-      31px
+      10px,
+      min(
+        8.5vw,
+        calc(
+          var(
+              --mobile-board-space,
+              calc(
+                var(--visual-viewport-height) -
+                  210px -
+                  env(safe-area-inset-bottom)
+              )
+            ) /
+            25
+        )
+      ),
+      26px
     );
   }
 

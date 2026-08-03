@@ -791,6 +791,8 @@ function GameBoard({
   const spinTimerRef = useRef<number | null>(null);
   const boardRef = useRef(board);
   const activeRef = useRef(active);
+  const gameRigRef = useRef<HTMLDivElement | null>(null);
+  const mobileControlsRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     startedAt.current = sharedStartAt ?? Date.now();
@@ -829,6 +831,67 @@ function GameBoard({
       document.removeEventListener("visibilitychange", updateFocus);
     };
   }, []);
+
+  useEffect(() => {
+    const rig = gameRigRef.current;
+    const controlsElement = mobileControlsRef.current;
+    if (!rig || !controlsElement) return;
+
+    const mobileQuery = window.matchMedia("(max-width: 760px)");
+    let frame = 0;
+    const delayedUpdates = new Set<number>();
+
+    const updateBoardSpace = () => {
+      window.cancelAnimationFrame(frame);
+      frame = window.requestAnimationFrame(() => {
+        if (!mobileQuery.matches) {
+          rig.style.removeProperty("--mobile-board-space");
+          return;
+        }
+        const rigTop = rig.getBoundingClientRect().top;
+        const controlsTop = controlsElement.getBoundingClientRect().top;
+        const available = Math.max(150, Math.floor(controlsTop - rigTop - 6));
+        rig.style.setProperty("--mobile-board-space", `${available}px`);
+      });
+    };
+
+    const scheduleViewportSettlingChecks = () => {
+      updateBoardSpace();
+      [120, 420, 1000].forEach((delay) => {
+        const timer = window.setTimeout(updateBoardSpace, delay);
+        delayedUpdates.add(timer);
+      });
+    };
+    const updateWhenVisible = () => {
+      if (document.visibilityState === "visible") scheduleViewportSettlingChecks();
+    };
+
+    const resizeObserver = new ResizeObserver(updateBoardSpace);
+    resizeObserver.observe(controlsElement);
+    const viewport = window.visualViewport;
+    viewport?.addEventListener("resize", scheduleViewportSettlingChecks);
+    viewport?.addEventListener("scroll", updateBoardSpace);
+    window.addEventListener("resize", scheduleViewportSettlingChecks);
+    window.addEventListener("orientationchange", scheduleViewportSettlingChecks);
+    window.addEventListener("pageshow", scheduleViewportSettlingChecks);
+    window.addEventListener("focus", scheduleViewportSettlingChecks);
+    document.addEventListener("visibilitychange", updateWhenVisible);
+    scheduleViewportSettlingChecks();
+
+    return () => {
+      window.cancelAnimationFrame(frame);
+      delayedUpdates.forEach((timer) => window.clearTimeout(timer));
+      resizeObserver.disconnect();
+      viewport?.removeEventListener("resize", scheduleViewportSettlingChecks);
+      viewport?.removeEventListener("scroll", updateBoardSpace);
+      window.removeEventListener("resize", scheduleViewportSettlingChecks);
+      window.removeEventListener("orientationchange", scheduleViewportSettlingChecks);
+      window.removeEventListener("pageshow", scheduleViewportSettlingChecks);
+      window.removeEventListener("focus", scheduleViewportSettlingChecks);
+      document.removeEventListener("visibilitychange", updateWhenVisible);
+      rig.style.removeProperty("--mobile-board-space");
+    };
+  }, [mobileControlLayout]);
 
   const finish = useCallback(
     (nextStatus: "won" | "lost", reason?: FinishReason) => {
@@ -1820,7 +1883,7 @@ function GameBoard({
         </span>
       </div>
 
-      <div className="game-rig">
+      <div className="game-rig" ref={gameRigRef}>
         <aside className="piece-rail">
           <span>HOLD</span>
           <MiniPiece type={held} />
@@ -2107,7 +2170,11 @@ function GameBoard({
           </div>
         </aside>
       </div>
-      <div className="mobile-controls" aria-label="모바일 게임 조작">
+      <div
+        className="mobile-controls"
+        aria-label="모바일 게임 조작"
+        ref={mobileControlsRef}
+      >
         {mobileControlLayout === "buttons" ? (
           <div
             className="touch-movement touch-movement-buttons"
@@ -6375,22 +6442,49 @@ export default function GameClient() {
     const root = document.documentElement;
     const updateVisualViewport = () => {
       const viewport = window.visualViewport;
-      const height = Math.max(320, viewport?.height ?? window.innerHeight);
+      const height = Math.max(
+        320,
+        Math.min(window.innerHeight, viewport?.height ?? window.innerHeight),
+      );
       const top = Math.max(0, viewport?.offsetTop ?? 0);
       root.style.setProperty("--visual-viewport-height", `${height}px`);
       root.style.setProperty("--visual-viewport-top", `${top}px`);
     };
-    updateVisualViewport();
-    window.addEventListener("resize", updateVisualViewport);
-    window.addEventListener("orientationchange", updateVisualViewport);
-    window.visualViewport?.addEventListener("resize", updateVisualViewport);
+    const delayedUpdates = new Set<number>();
+    const scheduleViewportSettlingChecks = () => {
+      updateVisualViewport();
+      [120, 420, 1000].forEach((delay) => {
+        const timer = window.setTimeout(updateVisualViewport, delay);
+        delayedUpdates.add(timer);
+      });
+    };
+    const updateWhenVisible = () => {
+      if (document.visibilityState === "visible") scheduleViewportSettlingChecks();
+    };
+    scheduleViewportSettlingChecks();
+    window.addEventListener("resize", scheduleViewportSettlingChecks);
+    window.addEventListener("orientationchange", scheduleViewportSettlingChecks);
+    window.addEventListener("pageshow", scheduleViewportSettlingChecks);
+    window.addEventListener("focus", scheduleViewportSettlingChecks);
+    document.addEventListener("visibilitychange", updateWhenVisible);
+    window.visualViewport?.addEventListener(
+      "resize",
+      scheduleViewportSettlingChecks,
+    );
     window.visualViewport?.addEventListener("scroll", updateVisualViewport);
     return () => {
-      window.removeEventListener("resize", updateVisualViewport);
-      window.removeEventListener("orientationchange", updateVisualViewport);
+      delayedUpdates.forEach((timer) => window.clearTimeout(timer));
+      window.removeEventListener("resize", scheduleViewportSettlingChecks);
+      window.removeEventListener(
+        "orientationchange",
+        scheduleViewportSettlingChecks,
+      );
+      window.removeEventListener("pageshow", scheduleViewportSettlingChecks);
+      window.removeEventListener("focus", scheduleViewportSettlingChecks);
+      document.removeEventListener("visibilitychange", updateWhenVisible);
       window.visualViewport?.removeEventListener(
         "resize",
-        updateVisualViewport,
+        scheduleViewportSettlingChecks,
       );
       window.visualViewport?.removeEventListener(
         "scroll",
