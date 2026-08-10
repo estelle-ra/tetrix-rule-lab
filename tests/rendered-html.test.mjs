@@ -172,6 +172,10 @@ test("ships without starter-only assets", async () => {
   assert.match(gameClient, /type: "attack-log"/);
   assert.match(gameClient, /targetMode: "cycle"/);
   assert.match(gameClient, /type: "target-select"/);
+  assert.match(gameClient, /type: "team-select"/);
+  assert.match(gameClient, /teamMode: boolean/);
+  assert.match(gameClient, /teamMode: false/);
+  assert.match(gameClient, /function playerTeam/);
   assert.match(gameClient, /type: "item-use"/);
   assert.match(gameClient, /type: "item-effect"/);
   assert.match(gameClient, /type: "item-state"/);
@@ -363,6 +367,14 @@ test("ships without starter-only assets", async () => {
   );
   assert.match(gameClient, /sharedStartAt=\{matchStartedAt\}/);
   assert.match(gameClient, /versusSpeedSteps \* VERSUS_SPEED_STEP_MS/);
+  assert.match(
+    gameClient,
+    /mode === "versus" \? 0 : Math\.floor\(lines \/ 10\) \* 55/,
+  );
+  assert.match(
+    gameClient,
+    /mode === "versus"\s*\? versusSpeedSteps \+ 1\s*:\s*Math\.floor\(lines \/ 10\) \+ 1/,
+  );
   assert.match(gameClient, /Math\.floor\(\(Date\.now\(\) - sharedStartAt\) \/ 1000\)/);
   assert.match(gameClient, /visibleRendered/);
   assert.match(gameClient, /className=\{`buffer-zone/);
@@ -389,7 +401,7 @@ test("ships without starter-only assets", async () => {
   assert.match(gameClient, /sendRealtimePacket\(\{ type: "leave" \}\)/);
   assert.match(
     gameClient,
-    /targetMode: "cycle",\s*revengeEnabled: false,\s*itemsEnabled: false,/,
+    /teamMode: false,\s*targetMode: "cycle",\s*revengeEnabled: false,\s*itemsEnabled: false,/,
   );
   assert.doesNotMatch(
     gameClient,
@@ -397,7 +409,10 @@ test("ships without starter-only assets", async () => {
   );
   assert.match(gameClient, /1000 \/ rules\.gravity/);
   assert.match(gameClient, /숫자가 작을수록 빠름/);
-  assert.match(gameClient, /방장이 정한 속도가 다음 경기부터 모두에게 적용됩니다/);
+  assert.match(gameClient, /지운 줄 수와 관계없이 경기 시간 15초마다/);
+  assert.match(gameClient, /TEAM A와 TEAM B/);
+  assert.match(gameClient, /playerTeam\(player\) !== senderTeam/);
+  assert.match(gameClient, /winningTeam\?: TeamId/);
   assert.match(gameClient, /pendingGarbage=\{pendingGarbage\}/);
   assert.match(
     gameClient,
@@ -521,6 +536,9 @@ test("ships without starter-only assets", async () => {
   assert.doesNotMatch(globalCss, /\.mobile-item-action/);
   assert.match(globalCss, /\.piece-W/);
   assert.match(globalCss, /\.touch-step/);
+  assert.match(globalCss, /\.lobby-team/);
+  assert.match(globalCss, /\.remote-player-teammate/);
+  assert.match(globalCss, /\.mobile-opponent-card\.mobile-teammate-card/);
   assert.match(globalCss, /var\(--visual-viewport-height\)/);
   assert.match(globalCss, /--mobile-board-space/);
   assert.match(

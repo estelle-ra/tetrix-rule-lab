@@ -2151,7 +2151,7 @@ button.online-choice:hover {
   color: #4c525a;
   display: grid;
   gap: 11px;
-  grid-template-columns: 27px minmax(0, 1fr) auto auto;
+  grid-template-columns: 27px minmax(0, 1fr) auto auto auto;
   min-height: 62px;
   padding: 0 13px;
 }
@@ -2164,6 +2164,32 @@ button.online-choice:hover {
 .lobby-slot > strong {
   font-size: 15px;
   letter-spacing: 0.04em;
+}
+
+.lobby-team,
+.remote-team {
+  border: 1px solid currentColor;
+  font: 800 9px/1 monospace;
+  letter-spacing: 0.06em;
+}
+
+.lobby-team {
+  background: transparent;
+  min-height: 28px;
+  padding: 0 8px;
+}
+
+.lobby-team:disabled {
+  cursor: default;
+  opacity: 0.78;
+}
+
+.team-a {
+  color: var(--cyan);
+}
+
+.team-b {
+  color: var(--violet);
 }
 
 .lobby-spectators {
@@ -2649,6 +2675,11 @@ button.online-choice:hover {
   box-shadow: 0 0 0 2px rgba(255, 108, 58, 0.22);
 }
 
+.remote-player-teammate {
+  border-color: rgba(67, 213, 232, 0.38);
+  box-shadow: inset 0 0 18px rgba(67, 213, 232, 0.05);
+}
+
 .remote-player-head {
   display: flex;
   gap: 6px;
@@ -2671,6 +2702,12 @@ button.online-choice:hover {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.remote-team {
+  flex: 0 0 auto;
+  margin-left: 6px;
+  padding: 3px 4px;
 }
 
 .remote-player-hotkey {
@@ -5470,6 +5507,11 @@ footer {
   .mobile-opponent-card.strip-selected {
     border-color: var(--orange);
     box-shadow: 0 0 0 1px rgba(255, 111, 57, 0.34);
+  }
+
+  .mobile-opponent-card.mobile-teammate-card {
+    background: rgba(67, 213, 232, 0.07);
+    border-color: rgba(67, 213, 232, 0.42);
   }
 
   .screen-multiplayer-playing .opponents-zone {

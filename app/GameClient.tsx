@@ -54,6 +54,7 @@ type Piece = {
 
 type TSpinKind = "full" | "mini" | null;
 type KickOffset = readonly [number, number];
+type TeamId = "A" | "B";
 
 type Controls = {
   left: string;
@@ -69,6 +70,7 @@ type Rules = {
   gravity: number;
   attack: number;
   ghost: boolean;
+  teamMode: boolean;
   targetMode: "cycle" | "random" | "all" | "manual";
   revengeEnabled: boolean;
   itemsEnabled: boolean;
@@ -111,6 +113,7 @@ type RoomPlayer = {
   slot: number;
   alive: boolean;
   connected: boolean;
+  team?: TeamId;
   spectating?: boolean;
   eliminatedAt?: number;
   snapshot?: GameSnapshot;
@@ -161,6 +164,7 @@ type RoomPacket =
   | { type: "attack"; amount: number; comboChain?: number }
   | { type: "garbage"; id: number; amount: number; comboChain?: number }
   | { type: "target-select"; targetId: string }
+  | { type: "team-select"; team: TeamId }
   | {
       type: "revenge-use";
       kind: RevengeAttackKind;
@@ -194,6 +198,7 @@ type RoomPacket =
       type: "end";
       winnerId: string;
       winnerName: string;
+      winningTeam?: TeamId;
       endedAt: number;
       players: RoomPlayer[];
     }
@@ -211,10 +216,19 @@ type RealtimeSnapshotEnvelope = {
   snapshot: GameSnapshot;
 };
 
-function rankRoomPlayers(players: RoomPlayer[], winnerId: string) {
+function rankRoomPlayers(
+  players: RoomPlayer[],
+  winnerId: string,
+  winningTeam?: TeamId,
+) {
   return players
     .filter((player) => !player.spectating)
     .sort((a, b) => {
+      if (winningTeam) {
+        const aWon = a.team === winningTeam;
+        const bWon = b.team === winningTeam;
+        if (aWon !== bWon) return aWon ? -1 : 1;
+      }
       if (a.id === winnerId) return -1;
       if (b.id === winnerId) return 1;
       const eliminationDifference =
@@ -384,6 +398,7 @@ const DEFAULT_RULES: Rules = {
   gravity: 420,
   attack: 1,
   ghost: true,
+  teamMode: false,
   targetMode: "cycle",
   revengeEnabled: false,
   itemsEnabled: false,
@@ -1155,7 +1170,7 @@ function GameBoard({
     const normalGravity = Math.max(
       mode === "versus" ? VERSUS_MIN_GRAVITY_MS : 90,
       configuredGravity -
-        Math.floor(lines / 10) * 55 -
+        (mode === "versus" ? 0 : Math.floor(lines / 10) * 55) -
         versusSpeedSteps * VERSUS_SPEED_STEP_MS,
     );
     let lastDropAt = window.performance.now();
@@ -1817,7 +1832,10 @@ function GameBoard({
         .some((row) => row.some(Boolean)),
     [board],
   );
-  const displayLevel = Math.floor(lines / 10) + versusSpeedSteps + 1;
+  const displayLevel =
+    mode === "versus"
+      ? versusSpeedSteps + 1
+      : Math.floor(lines / 10) + 1;
 
   useEffect(() => {
     onSnapshotRef.current = onSnapshot;
@@ -2318,6 +2336,23 @@ function roomCompetitors(players: RoomPlayer[]) {
   return players.filter((player) => !player.spectating);
 }
 
+function defaultTeamForSlot(slot: number): TeamId {
+  return slot % 2 === 0 ? "A" : "B";
+}
+
+function playerTeam(player: RoomPlayer): TeamId {
+  return player.team ?? defaultTeamForSlot(player.slot);
+}
+
+function balancedTeamFor(players: RoomPlayer[]): TeamId {
+  const competitors = roomCompetitors(players);
+  const teamACount = competitors.filter(
+    (player) => playerTeam(player) === "A",
+  ).length;
+  const teamBCount = competitors.length - teamACount;
+  return teamACount <= teamBCount ? "A" : "B";
+}
+
 function normalizeLobbyRoster(players: RoomPlayer[]) {
   const connected = players
     .filter((player) => player.connected)
@@ -2328,6 +2363,10 @@ function normalizeLobbyRoster(players: RoomPlayer[]) {
   return ordered.map((player, index) => ({
     ...player,
     slot: index,
+    team:
+      index < MAX_ROOM_PLAYERS
+        ? player.team ?? defaultTeamForSlot(index)
+        : undefined,
     alive: index < MAX_ROOM_PLAYERS,
     spectating: index >= MAX_ROOM_PLAYERS,
     eliminatedAt: undefined,
@@ -2491,6 +2530,7 @@ function RemoteBoardView({
   isSelf,
   selected,
   targeting,
+  teammate,
   hotkey,
   inked,
   effect,
@@ -2503,6 +2543,7 @@ function RemoteBoardView({
   isSelf?: boolean;
   selected?: boolean;
   targeting?: boolean;
+  teammate?: boolean;
   hotkey?: number;
   inked?: boolean;
   effect?: ItemType | null;
@@ -2522,7 +2563,7 @@ function RemoteBoardView({
     <article
       id={`remote-player-${player.id}`}
       data-player-id={player.id}
-      className={`remote-player ${!player.alive ? "remote-player-out" : ""} ${player.alive && player.connected && !snapshotReady ? "remote-player-syncing" : ""} ${isSelf ? "remote-player-self" : ""} ${selected ? "remote-player-selected" : ""} ${targeting ? "remote-player-targetable" : ""} ${inked ? "remote-player-inked" : ""} ${visibleEffect ? `remote-player-effect-${visibleEffect}` : ""}`}
+      className={`remote-player ${!player.alive ? "remote-player-out" : ""} ${player.alive && player.connected && !snapshotReady ? "remote-player-syncing" : ""} ${isSelf ? "remote-player-self" : ""} ${teammate ? "remote-player-teammate" : ""} ${selected ? "remote-player-selected" : ""} ${targeting ? "remote-player-targetable" : ""} ${inked ? "remote-player-inked" : ""} ${visibleEffect ? `remote-player-effect-${visibleEffect}` : ""}`}
       onClick={targeting ? onSelect : undefined}
     >
       <div className="remote-player-head">
@@ -2536,6 +2577,11 @@ function RemoteBoardView({
             </span>
           )}
           <span className="remote-player-name">{player.name}</span>
+          {player.team && (
+            <b className={`remote-team team-${player.team.toLowerCase()}`}>
+              {player.team}
+            </b>
+          )}
         </span>
         <em>
           {player.alive
@@ -2616,6 +2662,7 @@ const RemoteBoard = memo(
     previous.isSelf === next.isSelf &&
     previous.selected === next.selected &&
     previous.targeting === next.targeting &&
+    previous.teammate === next.teammate &&
     previous.hotkey === next.hotkey &&
     previous.inked === next.inked &&
     previous.effect === next.effect &&
@@ -2656,6 +2703,7 @@ function OnlineParty({
   const [roomError, setRoomError] = useState("");
   const [winnerId, setWinnerId] = useState("");
   const [winnerName, setWinnerName] = useState("");
+  const [winningTeam, setWinningTeam] = useState<TeamId | undefined>();
   const [matchStartedAt, setMatchStartedAt] = useState(0);
   const [matchEndedAt, setMatchEndedAt] = useState(0);
   const [showResultCard, setShowResultCard] = useState(false);
@@ -2889,6 +2937,7 @@ function OnlineParty({
     nextWinnerId: string,
     nextWinnerName: string,
     endedAt = Date.now(),
+    nextWinningTeam?: TeamId,
   ) => {
     clearResultReveal();
     clearGarbageQueueTimer();
@@ -2900,6 +2949,7 @@ function OnlineParty({
     setGarbageLaunchEffects([]);
     setWinnerId(nextWinnerId);
     setWinnerName(nextWinnerName);
+    setWinningTeam(nextWinningTeam);
     setMatchEndedAt(endedAt);
     setShowResultCard(false);
     setPhase("ended");
@@ -3331,9 +3381,17 @@ function OnlineParty({
     });
   };
 
+  useEffect(() => {
+    if (role !== "host" || phase !== "lobby") return;
+    publishRoster(playersRef.current);
+    // Room rule changes must be visible to guests before the match starts.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [matchRules, phase, role]);
+
   const reportLocalMatchResult = (
     finalPlayers: RoomPlayer[],
     winnerId: string,
+    winningTeam?: TeamId,
   ) => {
     const activeMatchId = activeMatchIdRef.current;
     if (!activeMatchId || resultMatchIdRef.current === activeMatchId) return;
@@ -3341,7 +3399,7 @@ function OnlineParty({
       (player) => player.id === localIdRef.current,
     );
     if (!localPlayer || localPlayer.spectating) return;
-    const standings = rankRoomPlayers(finalPlayers, winnerId);
+    const standings = rankRoomPlayers(finalPlayers, winnerId, winningTeam);
     const localRank = standings.findIndex(
       (player) => player.id === localPlayer.id,
     );
@@ -3353,7 +3411,8 @@ function OnlineParty({
             .filter(
               ({ player }) =>
                 Boolean(player.userId) &&
-                player.userId !== localPlayer.userId,
+                player.userId !== localPlayer.userId &&
+                (!winningTeam || player.team !== localPlayer.team),
             )
             .map(({ player, rank }) => ({
               opponentId: player.userId!,
@@ -3365,7 +3424,9 @@ function OnlineParty({
       score: localPlayer.snapshot?.score ?? 0,
       timeMs: Math.max(1, Date.now() - activeMatchId),
       lines: localPlayer.snapshot?.lines ?? 0,
-      won: localPlayer.id === winnerId,
+      won: winningTeam
+        ? localPlayer.team === winningTeam
+        : localPlayer.id === winnerId,
       matchKey: `${roomCodeRef.current}:${activeMatchId}`,
       headToHead,
     });
@@ -3373,15 +3434,34 @@ function OnlineParty({
 
   const concludeIfNeeded = (next: RoomPlayer[]) => {
     if (phaseRef.current !== "playing") return;
-    const survivors = next.filter((player) => player.alive && player.connected);
-    if (survivors.length > 1 || next.length < 2) return;
+    const competitors = next.filter((player) => !player.spectating);
+    const survivors = competitors.filter(
+      (player) => player.alive && player.connected,
+    );
+    const teamMode = Boolean(rulesRef.current.teamMode);
+    const survivingTeams = new Set(survivors.map((player) => playerTeam(player)));
+    if (
+      (teamMode ? survivingTeams.size > 1 : survivors.length > 1) ||
+      competitors.length < 2
+    ) {
+      return;
+    }
+    const fallbackWinner = [...competitors].sort(
+      (a, b) => (b.snapshot?.score ?? 0) - (a.snapshot?.score ?? 0),
+    )[0];
+    const resolvedWinningTeam = teamMode
+      ? playerTeam(survivors[0] ?? fallbackWinner)
+      : undefined;
     const winner =
-      survivors[0] ??
-      next
-        .filter((player) => !player.spectating)
+      survivors
+        .filter(
+          (player) =>
+            !resolvedWinningTeam || playerTeam(player) === resolvedWinningTeam,
+        )
         .sort(
           (a, b) => (b.snapshot?.score ?? 0) - (a.snapshot?.score ?? 0),
-        )[0];
+        )[0] ??
+      fallbackWinner;
     if (!winner) return;
     const endedAt = Date.now();
     const finalPlayers = next.map((player) =>
@@ -3390,12 +3470,21 @@ function OnlineParty({
         : player,
     );
     replacePlayers(finalPlayers);
-    beginMatchEnd(winner.id, winner.name, endedAt);
-    reportLocalMatchResult(finalPlayers, winner.id);
+    const winnerLabel = resolvedWinningTeam
+      ? `TEAM ${resolvedWinningTeam}`
+      : winner.name;
+    beginMatchEnd(
+      winner.id,
+      winnerLabel,
+      endedAt,
+      resolvedWinningTeam,
+    );
+    reportLocalMatchResult(finalPlayers, winner.id, resolvedWinningTeam);
     broadcast({
       type: "end",
       winnerId: winner.id,
-      winnerName: winner.name,
+      winnerName: winnerLabel,
+      winningTeam: resolvedWinningTeam,
       endedAt,
       players: finalPlayers,
     });
@@ -3424,9 +3513,17 @@ function OnlineParty({
     amount: number,
     comboChain = 0,
   ) => {
+    const senderPlayer = playersRef.current.find(
+      (player) => player.id === fromId && player.alive && player.connected,
+    );
+    if (!senderPlayer) return;
+    const senderTeam = senderPlayer ? playerTeam(senderPlayer) : undefined;
     const opponents = playersRef.current.filter(
       (player) =>
-        player.id !== fromId && player.alive && player.connected,
+        player.id !== fromId &&
+        player.alive &&
+        player.connected &&
+        (!rulesRef.current.teamMode || playerTeam(player) !== senderTeam),
     );
     if (!opponents.length) return;
     const mode = rulesRef.current.targetMode;
@@ -3446,8 +3543,7 @@ function OnlineParty({
       targets = [opponents[targetCursor.current % opponents.length]];
       targetCursor.current += 1;
     }
-    const sender =
-      playersRef.current.find((player) => player.id === fromId)?.name ?? "PLAYER";
+    const sender = senderPlayer?.name ?? "PLAYER";
     targets.forEach((target, index) => {
       const packet: RoomPacket = {
         type: "garbage",
@@ -3487,12 +3583,15 @@ function OnlineParty({
     const sender = playersRef.current.find(
       (player) => player.id === fromId && player.alive && player.connected,
     );
+    const senderTeam = sender ? playerTeam(sender) : undefined;
     const target = playersRef.current.find(
       (player) =>
         player.id === targetId &&
         player.id !== fromId &&
         player.alive &&
-        player.connected,
+        player.connected &&
+        (!rulesRef.current.teamMode ||
+          (senderTeam !== undefined && playerTeam(player) !== senderTeam)),
     );
     if (!sender || !target) return;
     const useKey = `${fromId}:${item}`;
@@ -3564,12 +3663,15 @@ function OnlineParty({
         !player.spectating &&
         player.connected,
     );
+    const senderTeam = sender ? playerTeam(sender) : undefined;
     const target = playersRef.current.find(
       (player) =>
         player.id === targetId &&
         player.id !== fromId &&
         player.alive &&
-        player.connected,
+        player.connected &&
+        (!rulesRef.current.teamMode ||
+          (senderTeam !== undefined && playerTeam(player) !== senderTeam)),
     );
     if (!sender || !target) return;
     revengeUsesRef.current.add(fromId);
@@ -3774,6 +3876,9 @@ function OnlineParty({
           slot,
           alive: !joiningAsSpectator,
           connected: true,
+          team: joiningAsSpectator
+            ? undefined
+            : balancedTeamFor(playersRef.current),
           spectating: joiningAsSpectator,
         },
       ].sort((a, b) => a.slot - b.slot);
@@ -3819,6 +3924,17 @@ function OnlineParty({
     }
     if (packet.type === "target-select") {
       manualTargetsRef.current.set(senderId, packet.targetId);
+    }
+    if (
+      packet.type === "team-select" &&
+      phaseRef.current === "lobby" &&
+      rulesRef.current.teamMode
+    ) {
+      publishRoster(
+        playersRef.current.map((player) =>
+          player.id === senderId ? { ...player, team: packet.team } : player,
+        ),
+      );
     }
     if (packet.type === "revenge-use") {
       routeRevenge(senderId, packet.targetId, packet.kind);
@@ -3973,6 +4089,7 @@ function OnlineParty({
           slot: 0,
           alive: true,
           connected: true,
+          team: "A",
         };
         localIdRef.current = id;
         setLocalId(id);
@@ -4038,6 +4155,7 @@ function OnlineParty({
       setMatchEndedAt(0);
       setWinnerId("");
       setWinnerName("");
+      setWinningTeam(undefined);
       setShowResultCard(false);
       setLocalEndReason("topout");
       setLocalRevengeUsed(false);
@@ -4110,6 +4228,7 @@ function OnlineParty({
       setMatchRules(packet.rules);
       setWinnerId("");
       setWinnerName("");
+      setWinningTeam(undefined);
       setMatchStartedAt(0);
       setMatchEndedAt(0);
       setShowResultCard(false);
@@ -4129,8 +4248,17 @@ function OnlineParty({
     if (packet.type === "end") {
       clearCountdown();
       replacePlayers(packet.players);
-      beginMatchEnd(packet.winnerId, packet.winnerName, packet.endedAt);
-      reportLocalMatchResult(packet.players, packet.winnerId);
+      beginMatchEnd(
+        packet.winnerId,
+        packet.winnerName,
+        packet.endedAt,
+        packet.winningTeam,
+      );
+      reportLocalMatchResult(
+        packet.players,
+        packet.winnerId,
+        packet.winningTeam,
+      );
     }
     if (packet.type === "full") {
       clearConnectionTimeout();
@@ -4464,6 +4592,7 @@ function OnlineParty({
             slot: 0,
             alive: true,
             connected: true,
+            team: "A",
           };
           if (!reconnecting) replacePlayers([host]);
           setConnectionStatus("");
@@ -4649,6 +4778,7 @@ function OnlineParty({
     setAttackLogs([]);
     setWinnerId("");
     setWinnerName("");
+    setWinningTeam(undefined);
     setMatchStartedAt(0);
     setMatchEndedAt(0);
     setShowResultCard(false);
@@ -4683,10 +4813,13 @@ function OnlineParty({
       );
     const competitors = connected
       .filter((player) => !player.spectating)
-      .map((player) => ({
+      .map((player, index) => ({
         ...player,
         alive: true,
         connected: true,
+        team: rulesRef.current.teamMode
+          ? player.team ?? defaultTeamForSlot(index)
+          : undefined,
         spectating: false,
         eliminatedAt: undefined,
         snapshot: undefined,
@@ -4707,6 +4840,15 @@ function OnlineParty({
     if (competitors.length < 2) {
       publishRoster(next);
       setRoomError("재대전을 시작하려면 한 명 이상 다시 접속해야 합니다.");
+      setPhase("lobby");
+      return;
+    }
+    if (
+      rulesRef.current.teamMode &&
+      new Set(competitors.map((player) => player.team)).size < 2
+    ) {
+      publishRoster(next);
+      setRoomError("팀전은 TEAM A와 TEAM B에 한 명 이상 필요합니다.");
       setPhase("lobby");
       return;
     }
@@ -4731,6 +4873,7 @@ function OnlineParty({
     setRoomError("");
     setWinnerId("");
     setWinnerName("");
+    setWinningTeam(undefined);
     setShowResultCard(false);
     setLocalEndReason("topout");
     setMatchId(nextMatchId);
@@ -4833,6 +4976,20 @@ function OnlineParty({
   };
 
   const selectTarget = (targetId: string) => {
+    const localPlayer = playersRef.current.find(
+      (player) => player.id === localIdRef.current,
+    );
+    const targetPlayer = playersRef.current.find(
+      (player) => player.id === targetId,
+    );
+    if (
+      !targetPlayer ||
+      (rulesRef.current.teamMode &&
+        localPlayer &&
+        playerTeam(targetPlayer) === playerTeam(localPlayer))
+    ) {
+      return;
+    }
     setSelectedTargetId(targetId);
     if (roleRef.current === "host") {
       manualTargetsRef.current.set(localIdRef.current, targetId);
@@ -5016,6 +5173,32 @@ function OnlineParty({
     }
   };
 
+  const setPlayerTeam = (playerId: string, team: TeamId) => {
+    if (
+      phaseRef.current !== "lobby" ||
+      !matchRules.teamMode ||
+      (roleRef.current !== "host" && playerId !== localIdRef.current)
+    ) {
+      return;
+    }
+    if (roleRef.current === "host") {
+      publishRoster(
+        playersRef.current.map((player) =>
+          player.id === playerId ? { ...player, team } : player,
+        ),
+      );
+      return;
+    }
+    if (realtimeChannelRef.current) {
+      sendRealtimePacket({ type: "team-select", team });
+    } else if (hostConnectionRef.current?.open) {
+      hostConnectionRef.current.send({
+        type: "team-select",
+        team,
+      } satisfies RoomPacket);
+    }
+  };
+
   const kickPlayer = (playerId: string) => {
     if (
       roleRef.current !== "host" ||
@@ -5096,6 +5279,7 @@ function OnlineParty({
     setRole(null);
     setWinnerId("");
     setWinnerName("");
+    setWinningTeam(undefined);
     setShowResultCard(false);
     setLocalEndReason("topout");
     setRoomError("");
@@ -5145,16 +5329,35 @@ function OnlineParty({
   const connectedCompetitorCount = competitors.filter(
     (player) => player.connected,
   ).length;
+  const lobbyTeamsReady =
+    !matchRules.teamMode ||
+    new Set(
+      competitors
+        .filter((player) => player.connected)
+        .map((player) => playerTeam(player)),
+    ).size >= 2;
   const remotePlayers = competitors.filter((player) => player.id !== localId);
+  const attackableRemotePlayers = remotePlayers.filter(
+    (player) =>
+      !matchRules.teamMode ||
+      !localPlayer ||
+      playerTeam(player) !== playerTeam(localPlayer),
+  );
   const localMatchOutcome =
     phase === "ended" && localPlayer && !localPlayer.spectating
-      ? localPlayer.id === winnerId
+      ? winningTeam
+        ? playerTeam(localPlayer) === winningTeam
+          ? "won"
+          : "lost"
+        : localPlayer.id === winnerId
         ? "won"
         : "lost"
       : null;
   const localWon = localMatchOutcome === "won";
   const matchEndDetail = localWon
-    ? "LAST PLAYER STANDING"
+    ? winningTeam
+      ? "LAST TEAM STANDING"
+      : "LAST PLAYER STANDING"
     : localEndReason === "garbage"
       ? "공격 블록이 한계선을 넘어 탈락했습니다"
       : "새 블록이 들어올 공간이 없어 탈락했습니다";
@@ -5181,7 +5384,7 @@ function OnlineParty({
   const itemRemaining = currentItem ? inventoryCounts[currentItem] : 0;
   const itemTotal = itemInventory.length;
   const selectedItemTarget =
-    remotePlayers.find(
+    attackableRemotePlayers.find(
       (player) =>
         player.id === selectedTargetId &&
         player.alive &&
@@ -5189,13 +5392,17 @@ function OnlineParty({
     ) ?? null;
   const revengeTarget =
     selectedItemTarget ??
-    remotePlayers.find((player) => player.alive && player.connected) ??
+    attackableRemotePlayers.find(
+      (player) => player.alive && player.connected,
+    ) ??
     null;
   const survivors = players.filter(
     (player) => !player.spectating && player.alive && player.connected,
   ).length;
   const standings =
-    phase === "ended" ? rankRoomPlayers(players, winnerId) : [];
+    phase === "ended"
+      ? rankRoomPlayers(players, winnerId, winningTeam)
+      : [];
   const inviteCode = initialRoomCode
     .toUpperCase()
     .replace(/[^A-Z0-9]/g, "")
@@ -5219,7 +5426,11 @@ function OnlineParty({
       const numberMatch = /^(?:Digit|Numpad)([1-7])$/.exec(event.code);
       if (numberMatch) {
         const opponent = remotePlayers[Number(numberMatch[1]) - 1];
-        if (opponent?.alive && opponent.connected) {
+        if (
+          opponent?.alive &&
+          opponent.connected &&
+          attackableRemotePlayers.some((player) => player.id === opponent.id)
+        ) {
           event.preventDefault();
           shortcutSelectTargetRef.current(opponent.id);
         }
@@ -5248,13 +5459,15 @@ function OnlineParty({
         return;
       }
       const opponent =
-        remotePlayers.find(
+        attackableRemotePlayers.find(
           (player) =>
             player.id === selectedTargetId &&
             player.alive &&
             player.connected,
         ) ??
-        remotePlayers.find((player) => player.alive && player.connected);
+        attackableRemotePlayers.find(
+          (player) => player.alive && player.connected,
+        );
       if (!opponent) return;
       event.preventDefault();
       if (opponent.id !== selectedTargetId) {
@@ -5266,6 +5479,7 @@ function OnlineParty({
     return () => window.removeEventListener("keydown", handleShortcut);
   }, [
     currentItem,
+    attackableRemotePlayers,
     isSpectating,
     matchRules.itemsEnabled,
     phase,
@@ -5420,6 +5634,22 @@ function OnlineParty({
                 >
                   <span>P{index + 1}</span>
                   <strong>{player?.name ?? "OPEN SLOT"}</strong>
+                  {matchRules.teamMode && player && (
+                    <button
+                      type="button"
+                      className={`lobby-team team-${playerTeam(player).toLowerCase()}`}
+                      disabled={role !== "host" && player.id !== localId}
+                      onClick={() =>
+                        setPlayerTeam(
+                          player.id,
+                          playerTeam(player) === "A" ? "B" : "A",
+                        )
+                      }
+                      aria-label={`${player.name} 팀 변경, 현재 TEAM ${playerTeam(player)}`}
+                    >
+                      TEAM {playerTeam(player)}
+                    </button>
+                  )}
                   <em>
                     {player
                       ? player.id === hostId
@@ -5478,7 +5708,7 @@ function OnlineParty({
             <span>
               {matchRules.gravity}ms 낙하 · 공격 {matchRules.attack.toFixed(1)}× ·
               고스트 {matchRules.ghost ? "ON" : "OFF"} · 타깃{" "}
-              {matchRules.targetMode.toUpperCase()} · 아이템{" "}
+              {matchRules.targetMode.toUpperCase()} · {matchRules.teamMode ? "TEAM A vs B" : "FREE FOR ALL"} · 아이템{" "}
               {matchRules.itemsEnabled
                 ? `${matchRules.itemMode.toUpperCase()} · ${enabledItems(matchRules)
                     .map((item) =>
@@ -5495,6 +5725,7 @@ function OnlineParty({
             <span>2 / 3 / 4줄 = 1 / 2 / 4 GARBAGE</span>
             <span>T-SPIN 1 / 2 / 3줄 = 2 / 4 / 6 GARBAGE</span>
             <span>3번째 연속 클리어부터 COMBO +1, +2…</span>
+            <span>낙하 속도는 모두 함께 15초마다 75ms 빨라집니다.</span>
           </div>
           <PartyChat
             messages={chatMessages}
@@ -5507,10 +5738,12 @@ function OnlineParty({
             <button
               className="start-online"
               onClick={startMatch}
-              disabled={connectedCompetitorCount < 2}
+              disabled={connectedCompetitorCount < 2 || !lobbyTeamsReady}
             >
               {connectedCompetitorCount < 2
                 ? "한 명 이상 기다리는 중…"
+                : !lobbyTeamsReady
+                  ? "TEAM A / B 선수가 필요합니다"
                 : "START MATCH →"}
             </button>
           ) : (
@@ -5666,6 +5899,12 @@ function OnlineParty({
             data-player-id={player.id}
             className={`mobile-opponent-card ${
               player.id === selectedTargetId ? "strip-selected" : ""
+            } ${
+              matchRules.teamMode &&
+              localPlayer &&
+              playerTeam(player) === playerTeam(localPlayer)
+                ? "mobile-teammate-card"
+                : ""
             } ${inkedPlayers[player.id] ? "card-inked" : ""} ${
               playerItemEffects[player.id]
                 ? `card-effect-${playerItemEffects[player.id].item}`
@@ -5680,6 +5919,9 @@ function OnlineParty({
                 (isSpectating && !canUseRevenge) ||
                 !player.alive ||
                 !player.connected ||
+                !attackableRemotePlayers.some(
+                  (candidate) => candidate.id === player.id,
+                ) ||
                 (!canUseRevenge &&
                   !matchRules.itemsEnabled &&
                   matchRules.targetMode !== "manual")
@@ -5687,7 +5929,10 @@ function OnlineParty({
               onClick={() => selectTarget(player.id)}
             >
               <i className={player.alive && player.connected ? "alive" : ""} />
-              <span>{player.name}</span>
+              <span>
+                {player.name}
+                {matchRules.teamMode ? ` · ${playerTeam(player)}` : ""}
+              </span>
               <em>
                 {player.alive
                   ? player.id === selectedTargetId
@@ -5834,9 +6079,12 @@ function OnlineParty({
         </div>
         <aside className="opponents-zone">
           <div className="opponents-title">
-            <span>OPPONENTS</span>
+            <span>{matchRules.teamMode ? "PLAYERS" : "OPPONENTS"}</span>
             <em>
               {matchRules.targetMode.toUpperCase()} · 1–7 TARGET
+              {matchRules.teamMode && localPlayer
+                ? ` · YOU: TEAM ${playerTeam(localPlayer)}`
+                : ""}
               {matchRules.itemsEnabled
                 ? currentItem
                   ? ` · E ${ITEM_META[currentItem].short} ×${itemRemaining}`
@@ -5857,13 +6105,20 @@ function OnlineParty({
                   null
                 }
                 selected={player.id === selectedTargetId}
+                teammate={
+                  Boolean(matchRules.teamMode && localPlayer) &&
+                  playerTeam(player) === playerTeam(localPlayer!)
+                }
                 targeting={
                   (canUseRevenge ||
                     (!isSpectating &&
                       (matchRules.targetMode === "manual" ||
                         matchRules.itemsEnabled))) &&
                   player.alive &&
-                  player.connected
+                  player.connected &&
+                  attackableRemotePlayers.some(
+                    (candidate) => candidate.id === player.id,
+                  )
                 }
                 currentItem={currentItem}
                 itemRemaining={itemRemaining}
@@ -5873,7 +6128,10 @@ function OnlineParty({
                   matchRules.itemsEnabled &&
                   Boolean(currentItem) &&
                   player.alive &&
-                  player.connected
+                  player.connected &&
+                  attackableRemotePlayers.some(
+                    (candidate) => candidate.id === player.id,
+                  )
                     ? () => activateItem(player.id)
                     : undefined
                 }
@@ -5929,7 +6187,13 @@ function OnlineParty({
               {standings.map((player, index) => (
                 <div
                   className={[
-                    index === 0 ? "result-winner" : "",
+                    winningTeam
+                      ? player.team === winningTeam
+                        ? "result-winner"
+                        : ""
+                      : index === 0
+                        ? "result-winner"
+                        : "",
                     player.id === localId ? "result-self" : "",
                   ]
                     .filter(Boolean)
@@ -5941,14 +6205,21 @@ function OnlineParty({
                     {index + 1}
                   </span>
                   <span className="result-player">
-                    <strong>{player.name}</strong>
+                    <strong>
+                      {player.name}
+                      {matchRules.teamMode && player.team
+                        ? ` · TEAM ${player.team}`
+                        : ""}
+                    </strong>
                     <small>
                       {player.snapshot?.lines ?? 0} LINES ·{" "}
                       {(player.snapshot?.score ?? 0).toLocaleString()} PTS
                     </small>
                   </span>
                   <em className="result-survival">
-                    {index === 0
+                    {(winningTeam
+                      ? player.team === winningTeam
+                      : index === 0)
                       ? (
                           <>
                             <strong>WINNER</strong>
@@ -6099,7 +6370,7 @@ function RulesPanel({
             </div>
             <small>
               {multiplayer
-                ? "방장이 정한 속도가 다음 경기부터 모두에게 적용됩니다. 경기 중 15초마다 75ms, 10줄마다 55ms 빨라지며 최소 50ms입니다."
+                ? "방장이 정한 속도로 함께 시작하며, 지운 줄 수와 관계없이 경기 시간 15초마다 모두 75ms씩 빨라집니다. 최소 50ms입니다."
                 : "10줄을 지울 때마다 55ms 빨라지며, 최소 90ms입니다."}
             </small>
           </label>
@@ -6169,6 +6440,27 @@ function RulesPanel({
           </section>
           {multiplayer && (
             <>
+              <button
+                className="switch-row"
+                onClick={() =>
+                  setRules({
+                    ...rules,
+                    teamMode: !rules.teamMode,
+                  })
+                }
+                aria-pressed={rules.teamMode}
+              >
+                <span>
+                  <strong>2팀 대전</strong>
+                  <small>
+                    TEAM A와 TEAM B로 나뉘며 모든 공격은 상대 팀에게만
+                    갑니다.
+                  </small>
+                </span>
+                <span
+                  className={`switch ${rules.teamMode ? "switch-on" : ""}`}
+                />
+              </button>
               <label>
                 <span>
                   <strong>공격 타깃 방식</strong>
@@ -6188,7 +6480,11 @@ function RulesPanel({
                   <option value="all">전원 — 모든 생존자에게</option>
                   <option value="manual">수동 — 상대 창을 클릭</option>
                 </select>
-                <small>전원 공격은 같은 가비지를 모든 생존 상대에게 보냅니다.</small>
+                <small>
+                  {rules.teamMode
+                    ? "타깃 방식은 상대 팀 생존자 안에서만 작동합니다."
+                    : "전원 공격은 같은 가비지를 모든 생존 상대에게 보냅니다."}
+                </small>
               </label>
               <button
                 className="switch-row"
